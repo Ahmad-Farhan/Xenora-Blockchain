@@ -1,3 +1,3 @@
-module bcn
+module xenora
 
 go 1.23.6

@@ -8,7 +8,7 @@ import (
 
 // Block represents a basic block in the Xenora blockchain
 type Block struct {
-	BlockHeader  BlockHeader   `json:"header"`
+	Header       BlockHeader   `json:"header"`
 	Transactions []Transaction `json:"transactions"`
 	Signature    []byte        `json:"signature"`
 }
@@ -66,7 +66,7 @@ func GenesisBlock() *Block {
 	}
 
 	return &Block{
-		BlockHeader:  header,
+		Header:       header,
 		Transactions: []Transaction{},
 		Signature:    []byte{},
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -236,7 +237,7 @@ func (n *Node) SendTo(peerId string, msgType MessageType, payload []byte) error 
 	n.lock.RUnlock()
 
 	if !exists || !peer.isActive {
-		return fmt.Error("Peer %s not connected", peerId)
+		return fmt.Errorf("Peer %s not connected", peerId)
 	}
 	return n.sendToPeer(peer, msgType, payload)
 }

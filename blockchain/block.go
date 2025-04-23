@@ -1,8 +1,11 @@
 package blockchain
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/gob"
 	"encoding/hex"
+	"log"
 	"time"
 )
 
@@ -32,21 +35,12 @@ const nullhash = "00000000000000000000000000000000000000000000000000000000000000
 
 // Hash calculates the hash of the block header
 func (h *BlockHeader) Hash() string {
-	// Convert header to bytes - maybe replace with a proper serialization method later
-	headerbytes := []byte(
-		string(h.Version) +
-			string(h.Height) +
-			h.PreviousHash +
-			h.MerkleRoot +
-			h.StateRoot +
-			h.Timestamp.String() +
-			string(h.Difficulty) +
-			string(h.Nonce) +
-			string(h.ShardID) +
-			h.ProposerID +
-			string(h.ConsensusData),
-	)
-	hash := sha256.Sum256(headerbytes)
+	data, err := h.Serialize()
+	if err != nil {
+		log.Printf("Error Serializing Block Header: %v", err)
+		return nullhash
+	}
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
 }
 
@@ -70,4 +64,36 @@ func GenesisBlock() *Block {
 		Transactions: []Transaction{},
 		Signature:    []byte{},
 	}
+}
+
+// Serialize converts the block header to bytes for hashing
+func (h *BlockHeader) Serialize() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(h); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// SerializeBlock converts an entire block to bytes
+func SerializeBlock(block *Block) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(block); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// DeserializeBlock converts bytes back to a Block
+func DeserializeBlock(data []byte) (*Block, error) {
+	var block Block
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&block)
+	if err != nil {
+		return nil, err
+	}
+	return &block, nil
 }

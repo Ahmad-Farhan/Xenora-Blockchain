@@ -7,13 +7,15 @@ import (
 	"encoding/hex"
 	"log"
 	"time"
+
+	"xenora/xtx"
 )
 
 // Block represents a basic block in the Xenora blockchain
 type Block struct {
-	Header       BlockHeader   `json:"header"`
-	Transactions []Transaction `json:"transactions"`
-	Signature    []byte        `json:"signature"`
+	Header       BlockHeader       `json:"header"`
+	Transactions []xtx.Transaction `json:"transactions"`
+	Signature    []byte            `json:"signature"`
 }
 
 // BlockHeader contains metadata about the block
@@ -61,7 +63,7 @@ func GenesisBlock() *Block {
 
 	return &Block{
 		Header:       header,
-		Transactions: []Transaction{},
+		Transactions: []xtx.Transaction{},
 		Signature:    []byte{},
 	}
 }

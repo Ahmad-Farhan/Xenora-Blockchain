@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"time"
 	"xenora/blockchain"
+	"xenora/xtx"
 )
 
 type SimpleConsensus struct {
@@ -26,7 +27,7 @@ func NewSimpleConsensus(bc *blockchain.Blockchain, diffculty uint32) *SimpleCons
 }
 
 // CreateBlock creates a new block with transactions from the pool
-func (sc *SimpleConsensus) CreateBlock(minerAddress string, txPool *blockchain.TransactionPool) (*blockchain.Block, error) {
+func (sc *SimpleConsensus) CreateBlock(minerAddress string, txPool *xtx.TransactionPool) (*blockchain.Block, error) {
 	latestblock := sc.blockchain.GetLatestBlock()
 	if latestblock == nil {
 		return nil, errors.New("blockchain not initialized")
@@ -54,7 +55,7 @@ func (sc *SimpleConsensus) CreateBlock(minerAddress string, txPool *blockchain.T
 	// Compute Merkle root (simplified) - Replace with proper merkle tree later
 	merkleHash := sha256.Sum256(merkleBuf)
 	header.MerkleRoot = hex.EncodeToString(merkleHash[:])
-	txs := make([]blockchain.Transaction, len(pendingTxs))
+	txs := make([]xtx.Transaction, len(pendingTxs))
 	for i, tx := range pendingTxs {
 		txs[i] = *tx
 	}

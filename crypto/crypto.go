@@ -50,6 +50,18 @@ func (kp *KeyPair) SignData(data []byte) ([]byte, error) {
 	return signature, nil
 }
 
+// SignData signs data with the private key
+func SignData(privateKey *ecdsa.PrivateKey, data []byte) ([]byte, error) {
+	hash := sha256.Sum256(data)
+	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
+	if err != nil {
+		return nil, err
+	}
+
+	signature := append(r.Bytes(), s.Bytes()...)
+	return signature, nil
+}
+
 // VerifySignature verifies a signature against a public key
 func VerifySignature(pubKey *ecdsa.PublicKey, data, signature []byte) bool {
 	if len(signature) != 64 {

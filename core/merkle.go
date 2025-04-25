@@ -1,41 +1,67 @@
-package merkle
+package core
 
 import (
-	"sync"
-	"time"
+	"crypto/sha256"
+	"encoding/hex"
+	"xenora/xtx"
 )
 
-type SyncRequest struct {
-	SourceShardID uint32
-	DestShardID   uint32
-	DataHashes    []string
-	Timestamp     time.Time
-	Signature     []byte
-	Nonce         uint64
+type MerkleTree struct {
+	RootNode *MerkleNode
 }
 
-type SyncResponse struct {
-	RequestID      uint32
-	SourceShardID  uint32
-	DataBlocks     map[string][]byte
-	StateRoot      string
-	Timestamp      time.Time
-	TransferProofs []*CrossShardProof
-	Signature      []byte
+type MerkleNode struct {
+	Left  *MerkleNode
+	Right *MerkleNode
+	Data  []byte
 }
 
-type CrossShardProof struct {
-	DataHash         string
-	SourceShardRoot  string
-	DestShardRoot    string
-	TransferPath     []*ProofNode
-	CommitmentHash   string
-	ValidationStatus bool
+func NewMerkleNode(left, right *MerkleNode, data []byte) *MerkleNode {
+	node := MerkleNode{}
+
+	if left == nil && right == nil {
+		hash := sha256.Sum256(data)
+		node.Data = hash[:]
+	} else {
+		prevHashes := append(left.Data, right.Data...)
+		hash := sha256.Sum256(prevHashes)
+		node.Data = hash[:]
+	}
+
+	node.Left = left
+	node.Right = right
+	return &node
 }
 
-type ProofNode struct {
-	forest       *AdaptiveMerkleForest
-	pendingSync  map[string]*SyncRequest
-	commitments  map[string]string
-	transferLock sync.RWMutex
+func NewMerkleTree(transactions []xtx.Transaction) *MerkleTree {
+	var nodes []*MerkleNode
+
+	for _, tx := range transactions {
+		txHash, _ := hex.DecodeString(tx.TxID)
+		nodes = append(nodes, NewMerkleNode(nil, nil, txHash))
+	}
+
+	if len(nodes)%2 != 0 {
+		nodes = append(nodes, nodes[len(nodes)-1])
+	}
+
+	for len(nodes) > 1 {
+		var level []*MerkleNode
+
+		for i := 0; i < len(nodes); i += 2 {
+			node := NewMerkleNode(nodes[i], nodes[i+1], nil)
+			level = append(level, node)
+		}
+
+		if len(level)%2 != 0 && len(level) > 1 {
+			level = append(level, level[len(level)-1])
+		}
+		nodes = level
+	}
+	tree := MerkleTree{nodes[0]}
+	return &tree
+}
+
+func (m *MerkleTree) GetRootHash() string {
+	return hex.EncodeToString(m.RootNode.Data)
 }

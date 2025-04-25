@@ -1,4 +1,4 @@
-package blockchain
+package xtx
 
 import (
 	"bytes"
@@ -40,7 +40,7 @@ type Transaction struct {
 	ExtraFields map[string]interface{} `json:"extraFields"` // Extensible fields for future use
 }
 
-// const nullhash = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros
+const nullhash = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros
 
 // NewTransaction creates a new unsigned transaction
 func NewTransaction(txType TransactionType, from, to string, value, nonce, fee uint64, data []byte) *Transaction {

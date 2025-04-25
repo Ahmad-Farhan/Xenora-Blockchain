@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -55,6 +57,14 @@ type Message struct {
 }
 
 type MessageHandler func(msg Message, peer *Peer) error
+
+// Initialize gob encoder with known types
+func init() {
+	gob.Register(&blockchain.Block{})
+	gob.Register(&xtx.Transaction{})
+	gob.Register(&Status{})
+	gob.Register(&BlockRequest{})
+}
 
 func NewNode(address string) (*Node, error) {
 	idBytes := make([]byte, 16)
@@ -108,19 +118,39 @@ func (n *Node) Connect(address string) error {
 	if err != nil {
 		return err
 	}
-	_, err = conn.Write([]byte(n.ID))
-	if err != nil {
-		conn.Close()
-		return err
+	// Send our node ID (fixed 32 bytes)
+	idBytes := []byte(n.ID)
+	if len(idBytes) > 32 {
+		idBytes = idBytes[:32]
+	} else if len(idBytes) < 32 {
+		padding := make([]byte, 32-len(idBytes))
+		idBytes = append(idBytes, padding...)
 	}
-	idBuf := make([]byte, 32)
-	_, err = conn.Read(idBuf)
+
+	_, err = conn.Write(idBytes)
 	if err != nil {
 		conn.Close()
 		return err
 	}
 
-	peerID := string(idBuf)
+	// Read peer ID
+	idBuf := make([]byte, 32)
+	_, err = io.ReadFull(conn, idBuf)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+
+	var nullIndex int
+	for nullIndex = 0; nullIndex < len(idBuf); nullIndex++ {
+		if idBuf[nullIndex] == 0 {
+			break
+		}
+	}
+	peerID := string(idBuf[:nullIndex])
+	if peerID == "" {
+		peerID = hex.EncodeToString(idBuf)
+	}
 
 	n.lock.Lock()
 	n.peers[peerID] = &Peer{
@@ -136,20 +166,39 @@ func (n *Node) Connect(address string) error {
 }
 
 func (n *Node) handleConnection(conn net.Conn) {
-	_, err := conn.Write([]byte(n.ID))
+	// Send our node ID (fixed 32 bytes)
+	idBytes := []byte(n.ID)
+	if len(idBytes) > 32 {
+		idBytes = idBytes[:32]
+	} else if len(idBytes) < 32 {
+		padding := make([]byte, 32-len(idBytes))
+		idBytes = append(idBytes, padding...)
+	}
+
+	_, err := conn.Write(idBytes)
 	if err != nil {
 		conn.Close()
 		return
 	}
 
 	idBuf := make([]byte, 32)
-	_, err = conn.Read(idBuf)
+	_, err = io.ReadFull(conn, idBuf)
 	if err != nil {
 		conn.Close()
 		return
 	}
 
-	peerID := string(idBuf)
+	var nullIndex int
+	for nullIndex = 0; nullIndex < len(idBuf); nullIndex++ {
+		if idBuf[nullIndex] == 0 {
+			break
+		}
+	}
+	peerID := string(idBuf[:nullIndex])
+	if peerID == "" {
+		peerID = hex.EncodeToString(idBuf)
+	}
+
 	peerAddr := conn.RemoteAddr().String()
 
 	n.lock.Lock()
@@ -166,25 +215,32 @@ func (n *Node) handleConnection(conn net.Conn) {
 }
 
 func (n *Node) handlePeerMessages(peerID string, conn net.Conn) {
+	defer conn.Close()
+
 	for {
 		typeBuf := make([]byte, 1)
-		_, err := conn.Read(typeBuf)
+		_, err := io.ReadFull(conn, typeBuf)
 		if err != nil {
 			n.disconnectPeer(peerID)
 			return
 		}
 
 		lenBuf := make([]byte, 4)
-		_, err = conn.Read(lenBuf)
+		_, err = io.ReadFull(conn, lenBuf)
 		if err != nil {
 			n.disconnectPeer(peerID)
 			return
 		}
 
-		msgLen := int(lenBuf[0])<<24 | int(lenBuf[1])<<16 | int(lenBuf[2])<<8 | int(lenBuf[3])
+		msgLen := binary.BigEndian.Uint32(lenBuf)
+		if msgLen > 10*1024*1024 { // 10MB max message size
+			log.Printf("Message too large from peer %s: %d bytes", peerID, msgLen)
+			n.disconnectPeer(peerID)
+			return
+		}
 
-		payLoad := make([]byte, msgLen)
-		_, err = conn.Read(payLoad)
+		payload := make([]byte, msgLen)
+		_, err = io.ReadFull(conn, payload)
 		if err != nil {
 			n.disconnectPeer(peerID)
 			return
@@ -198,7 +254,7 @@ func (n *Node) handlePeerMessages(peerID string, conn net.Conn) {
 		msg := Message{
 			Type:    MessageType(typeBuf[0]),
 			From:    peerID,
-			Payload: payLoad,
+			Payload: payload,
 		}
 		n.msgChan <- msg
 	}
@@ -242,22 +298,22 @@ func (n *Node) SendTo(peerId string, msgType MessageType, payload []byte) error 
 	n.lock.RUnlock()
 
 	if !exists || !peer.isActive {
-		return fmt.Errorf("Peer %s not connected", peerId)
+		return fmt.Errorf("peer %s not connected", peerId)
 	}
 	return n.sendToPeer(peer, msgType, payload)
 }
 
 func (n *Node) sendToPeer(peer *Peer, msgType MessageType, payload []byte) error {
 	msgLen := len(payload)
-	msg := make([]byte, 5+msgLen)
+	header := make([]byte, 5) // 1 byte type + 4 bytes length
 
-	msg[0] = byte(msgType)
-	msg[1] = byte(msgLen >> 24)
-	msg[1] = byte(msgLen >> 16)
-	msg[1] = byte(msgLen >> 8)
-	msg[1] = byte(msgLen)
+	header[0] = byte(msgType)
+	binary.BigEndian.PutUint32(header[1:], uint32(msgLen))
 
-	copy(msg[5:], payload)
+	// Create full message
+	msg := append(header, payload...)
+
+	// Send message
 	_, err := peer.conn.Write(msg)
 	return err
 }
@@ -274,8 +330,9 @@ func (n *Node) disconnectPeer(peerId string) {
 	defer n.lock.Unlock()
 
 	if peer, exists := n.peers[peerId]; exists {
-		peer.isActive = true
+		peer.isActive = false
 		peer.conn.Close()
+		log.Printf("Disconnected from peer %s", peerId)
 	}
 }
 

@@ -355,7 +355,7 @@ func (n *Node) Stop() {
 // BlockHandler processes incoming blocks
 func BlockHandler(bc *blockchain.Blockchain) MessageHandler {
 	return func(msg Message, peer *Peer) error {
-		block, err := deserializeBlock(msg.Payload)
+		block, err := blockchain.DeserializeBlock(msg.Payload)
 		if err != nil {
 			return fmt.Errorf("invalid block data: %v", err)
 		}
@@ -375,7 +375,7 @@ func BlockHandler(bc *blockchain.Blockchain) MessageHandler {
 // TransactionHandler processes incoming transactions
 func TransactionHandler(txPool *xtx.TransactionPool) MessageHandler {
 	return func(msg Message, peer *Peer) error {
-		tx, err := deserializeTransaction(msg.Payload)
+		tx, err := xtx.DeserializeTransaction(msg.Payload)
 		if err != nil {
 			return fmt.Errorf("invalid transaction data: %v", err)
 		}
@@ -413,7 +413,7 @@ func StatusHandler(bc *blockchain.Blockchain, node *Node) MessageHandler {
 
 // BroadcastBlock sends a block to all peers
 func BroadcastBlock(node *Node, block *blockchain.Block) error {
-	data, err := serializeBlock(block)
+	data, err := blockchain.SerializeBlock(block)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func BroadcastBlock(node *Node, block *blockchain.Block) error {
 
 // BroadcastTransaction sends a transaction to all peers
 func BroadcastTransaction(node *Node, tx *xtx.Transaction) error {
-	data, err := serializeTransaction(tx)
+	data, err := tx.Serialize()
 	if err != nil {
 		return err
 	}
@@ -484,46 +484,6 @@ type BlockRequest struct {
 
 // Serialization helpers
 
-func serializeBlock(block *blockchain.Block) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(block); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func deserializeBlock(data []byte) (*blockchain.Block, error) {
-	var block blockchain.Block
-	buf := bytes.NewReader(data)
-	dec := gob.NewDecoder(buf)
-	err := dec.Decode(&block)
-	if err != nil {
-		return nil, err
-	}
-	return &block, nil
-}
-
-func serializeTransaction(tx *xtx.Transaction) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(tx); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func deserializeTransaction(data []byte) (*xtx.Transaction, error) {
-	var tx xtx.Transaction
-	buf := bytes.NewReader(data)
-	dec := gob.NewDecoder(buf)
-	err := dec.Decode(&tx)
-	if err != nil {
-		return nil, err
-	}
-	return &tx, nil
-}
-
 func serializeStatus(status *Status) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
@@ -551,15 +511,4 @@ func serializeBlockRequest(req *BlockRequest) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func deserializeBlockRequest(data []byte) (*BlockRequest, error) {
-	var req BlockRequest
-	buf := bytes.NewReader(data)
-	dec := gob.NewDecoder(buf)
-	err := dec.Decode(&req)
-	if err != nil {
-		return nil, err
-	}
-	return &req, nil
 }

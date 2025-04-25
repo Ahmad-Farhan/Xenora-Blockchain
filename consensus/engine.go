@@ -27,7 +27,7 @@ func NewSimpleConsensus(bc *blockchain.Blockchain, diffculty uint32) *SimpleCons
 }
 
 // CreateBlock creates a new block with transactions from the pool
-func (sc *SimpleConsensus) CreateBlock(minerAddress string, txPool *xtx.TransactionPool) (*blockchain.Block, error) {
+func (sc *SimpleConsensus) CreateBlock(minerAddress string, coinbaseTx *xtx.Transaction, txPool *xtx.TransactionPool) (*blockchain.Block, error) {
 	latestblock := sc.blockchain.GetLatestBlock()
 	if latestblock == nil {
 		return nil, errors.New("blockchain not initialized")
@@ -45,6 +45,7 @@ func (sc *SimpleConsensus) CreateBlock(minerAddress string, txPool *xtx.Transact
 		ShardID:      0,
 	}
 
+	pendingTxs = prepend(pendingTxs, coinbaseTx)
 	//Compute Merkle Root (simplified for now)
 	merkleBuf := []byte{}
 	for _, tx := range pendingTxs {
@@ -114,4 +115,12 @@ func (sc *SimpleConsensus) ValidateBlock(block *blockchain.Block) error {
 		return errors.New("invalid proof of work")
 	}
 	return nil
+}
+
+// inserts the given transaction at the beginning of the slice.
+func prepend(txs []*xtx.Transaction, coinbase *xtx.Transaction) []*xtx.Transaction {
+	newTxs := make([]*xtx.Transaction, 0, len(txs)+1)
+	newTxs = append(newTxs, coinbase)
+	newTxs = append(newTxs, txs...)
+	return newTxs
 }

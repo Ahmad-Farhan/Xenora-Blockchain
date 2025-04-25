@@ -55,15 +55,12 @@ func (m *Miner) miningLoop() { // NEED TO INCLUDE COINBASE TX IN BLOCK
 		case <-m.ctx.Done():
 			return
 		default:
-			// pendingTxs := m.txPool.GetPending()
-
 			// Add coinbase transaction (mining reward)
-			// latestHeight := m.blockchain.GetLatestBlock().Header.Height
-			// coinbaseTx := xtx.CreateCoinbaseTx(m.minerAddr, blockReward, latestHeight+1)
+			latestHeight := m.blockchain.GetLatestBlock().Header.Height
+			coinbaseTx := xtx.CreateCoinbaseTx(m.minerAddr, blockReward, latestHeight+1)
 
-			// pendingTxs = append(pendingTxs, coinbase)
 			// Create block with transactions
-			block, err := m.consensus.CreateBlock(m.minerAddr, m.txPool)
+			block, err := m.consensus.CreateBlock(m.minerAddr, coinbaseTx, m.txPool)
 			if err != nil {
 				log.Printf("Failed to create block: %v", err)
 				time.Sleep(time.Second * 5)

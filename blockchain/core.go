@@ -39,7 +39,6 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	defer bc.lock.Unlock()
 
 	if err := bc.ValidateBlock(block); err != nil {
-		log.Print("Invalid Block")
 		return err
 	}
 
@@ -74,7 +73,6 @@ func (bc *Blockchain) GetBlockByHeight(height uint64) (*Block, error) {
 
 func (bc *Blockchain) ValidateBlock(block *Block) error {
 	if err := bc.ValidateBlockHeader(&block.Header); err != nil {
-		log.Printf("Invlaid Block header")
 		return err
 	}
 
@@ -96,7 +94,6 @@ func (bc *Blockchain) ValidateBlock(block *Block) error {
 		}
 
 		if err := bc.ValidateTransaction(&tx); err != nil {
-			log.Printf("Invalid Tx")
 			return err
 		}
 	}
@@ -128,7 +125,6 @@ func (bc *Blockchain) ValidateTransaction(tx *xtx.Transaction) error {
 	if tx.Type != xtx.RewardTx {
 		valid, err := tx.Verify()
 		if err != nil {
-			log.Printf("Failed Verufy")
 			return err
 		}
 		if !valid {

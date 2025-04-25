@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"sync"
 )
 
 // KeyPair represents a public/private key pair
@@ -18,6 +19,13 @@ type KeyPair struct {
 	PublicKey  *ecdsa.PublicKey
 }
 
+// In-memory store of public keys for testing purposes
+// In production, update to persistent store
+var (
+	pubKeyStore     = make(map[string]*ecdsa.PublicKey)
+	pubKeyStoreLock sync.RWMutex
+)
+
 // GenerateKeyPair creates a new public/private key pair
 func GenerateKeyPair() (*KeyPair, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -25,10 +33,14 @@ func GenerateKeyPair() (*KeyPair, error) {
 		return nil, err
 	}
 
-	return &KeyPair{
+	keyPair := &KeyPair{
 		PrivateKey: privateKey,
 		PublicKey:  &privateKey.PublicKey,
-	}, nil
+	}
+	pubKeyStoreLock.Lock()
+	pubKeyStore[keyPair.GetAddress()] = keyPair.PublicKey
+	pubKeyStoreLock.Unlock()
+	return keyPair, nil
 }
 
 // GetAddress returns the address (hex encoded public key hash)
@@ -77,8 +89,23 @@ func VerifySignature(pubKey *ecdsa.PublicKey, data, signature []byte) bool {
 
 // PublicKeyFromAddress converts an address back to a public key
 // Note: Store public keys, lookup the public key from a registry,
+// PublicKeyFromAddress retrieves a public key from an address
 func PublicKeyFromAddress(address string) (*ecdsa.PublicKey, error) {
-	return nil, errors.New("not implemented - requires key storage")
+	pubKeyStoreLock.RLock()
+	defer pubKeyStoreLock.RUnlock()
+
+	pubKey, exists := pubKeyStore[address]
+	if !exists {
+		return nil, errors.New("public key not found for address")
+	}
+	return pubKey, nil
+}
+
+// StorePublicKey stores a public key in the registry
+func StorePublicKey(address string, pubKey *ecdsa.PublicKey) {
+	pubKeyStoreLock.Lock()
+	defer pubKeyStoreLock.Unlock()
+	pubKeyStore[address] = pubKey
 }
 
 // SavePrivateKey exports a private key to PEM format
@@ -110,4 +137,41 @@ func LoadPrivateKey(pemEncoded string) (*ecdsa.PrivateKey, error) {
 	}
 
 	return privateKey, nil
+}
+
+// SavePublicKey exports a public key to PEM format
+func SavePublicKey(key *ecdsa.PublicKey) (string, error) {
+	x509EncodedPub, err := x509.MarshalPKIXPublicKey(key)
+	if err != nil {
+		return "", err
+	}
+
+	pemBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: x509EncodedPub,
+	}
+
+	data := pem.EncodeToMemory(pemBlock)
+	return string(data), nil
+}
+
+// LoadPublicKey imports a public key from PEM format
+func LoadPublicKey(pemEncoded string) (*ecdsa.PublicKey, error) {
+	block, _ := pem.Decode([]byte(pemEncoded))
+	if block == nil {
+		return nil, errors.New("failed to parse PEM block")
+	}
+
+	x509EncodedPub := block.Bytes
+	genericPublicKey, err := x509.ParsePKIXPublicKey(x509EncodedPub)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey, ok := genericPublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, errors.New("failed to parse public key")
+	}
+
+	return publicKey, nil
 }

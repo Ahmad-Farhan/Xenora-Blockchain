@@ -55,8 +55,6 @@ func NewTransaction(txType TransactionType, from, to string, value, nonce, fee u
 		Fee:         fee,
 		ExtraFields: make(map[string]interface{}),
 	}
-	// Compute transaction ID (hash)
-	tx.TxID = tx.Hash()
 	return &tx
 }
 
@@ -86,16 +84,35 @@ func (tx *Transaction) Serialize() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func DeserializeTransaction(data []byte) (*Transaction, error) {
+	var tx Transaction
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&tx)
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
 // Serializes without Signature
 func (tx *Transaction) serializeForSign() ([]byte, error) {
 	txCopy := *tx
+	txCopy.TxID = ""
 	txCopy.Signature = nil
+	return txCopy.Serialize()
+}
+
+// Serializes for Hash
+func (tx *Transaction) serializeForHash() ([]byte, error) {
+	txCopy := *tx
+	txCopy.TxID = ""
 	return txCopy.Serialize()
 }
 
 // Hash computes the hash of the transaction (excluding the signature) //Needs Update
 func (tx *Transaction) Hash() string {
-	txBytes, err := tx.serializeForSign()
+	txBytes, err := tx.serializeForHash()
 	if err != nil {
 		log.Printf("Error Serializing Block Header: %v", err)
 		return nullhash
@@ -121,6 +138,7 @@ func (tx *Transaction) Sign(privateKey *ecdsa.PrivateKey) error {
 	}
 
 	tx.Signature = signature
+	tx.TxID = tx.Hash()
 	return nil
 }
 
@@ -166,7 +184,15 @@ func NewTransactionPool() *TransactionPool {
 
 // Add adds a transaction to the pool
 func (pool *TransactionPool) Add(tx *Transaction) bool {
-	// Potentially validate  before adding
+	if _, exists := pool.pending[tx.TxID]; exists {
+		return false
+	}
+	if tx.Type != RewardTx {
+		valid, err := tx.Verify()
+		if err != nil || !valid {
+			return false
+		}
+	}
 	pool.pending[tx.TxID] = tx
 	return true
 }

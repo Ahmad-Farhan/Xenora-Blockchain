@@ -41,7 +41,12 @@ func NewMerkleTree(transactions []xtx.Transaction) *MerkleTree {
 		nodes = append(nodes, NewMerkleNode(nil, nil, txHash))
 	}
 
-	if len(nodes)%2 != 0 {
+	if len(nodes) == 0 {
+		root := NewMerkleNode(nil, nil, []byte{})
+		return &MerkleTree{root}
+	}
+
+	if len(nodes)%2 != 0 && len(nodes) > 1 {
 		nodes = append(nodes, nodes[len(nodes)-1])
 	}
 
@@ -49,8 +54,13 @@ func NewMerkleTree(transactions []xtx.Transaction) *MerkleTree {
 		var level []*MerkleNode
 
 		for i := 0; i < len(nodes); i += 2 {
-			node := NewMerkleNode(nodes[i], nodes[i+1], nil)
-			level = append(level, node)
+			if i+1 < len(nodes) {
+				node := NewMerkleNode(nodes[i], nodes[i+1], nil)
+				level = append(level, node)
+			} else {
+				node := NewMerkleNode(nodes[i], nodes[i], nil)
+				level = append(level, node)
+			}
 		}
 
 		if len(level)%2 != 0 && len(level) > 1 {

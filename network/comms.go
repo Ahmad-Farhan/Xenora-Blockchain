@@ -1,14 +1,19 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/gob"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
 	"sync"
 	"time"
+
+	"xenora/blockchain"
+	"xenora/xtx"
 )
 
 type Node struct {
@@ -38,7 +43,7 @@ const (
 	TransactionMsg
 	PeerDiscoveryMsg
 	StatusMsg
-	RequestBLockMsg
+	RequestBlockMsg
 	RequestStateMsg
 )
 
@@ -288,4 +293,216 @@ func (n *Node) Stop() {
 		}
 	}
 	n.lock.Unlock()
+}
+
+// BlockHandler processes incoming blocks
+func BlockHandler(bc *blockchain.Blockchain) MessageHandler {
+	return func(msg Message, peer *Peer) error {
+		block, err := deserializeBlock(msg.Payload)
+		if err != nil {
+			return fmt.Errorf("invalid block data: %v", err)
+		}
+
+		log.Printf("Received block at height %d from %s", block.Header.Height, peer.ID)
+
+		// Add block to blockchain
+		err = bc.AddBlock(block)
+		if err != nil {
+			return fmt.Errorf("failed to add block: %v", err)
+		}
+
+		return nil
+	}
+}
+
+// TransactionHandler processes incoming transactions
+func TransactionHandler(txPool *xtx.TransactionPool) MessageHandler {
+	return func(msg Message, peer *Peer) error {
+		tx, err := deserializeTransaction(msg.Payload)
+		if err != nil {
+			return fmt.Errorf("invalid transaction data: %v", err)
+		}
+
+		log.Printf("Received transaction %s from %s", tx.TxID, peer.ID)
+
+		// Add transaction to pool
+		txPool.Add(tx)
+
+		return nil
+	}
+}
+
+// StatusHandler processes status messages
+func StatusHandler(bc *blockchain.Blockchain, node *Node) MessageHandler {
+	return func(msg Message, peer *Peer) error {
+		status, err := deserializeStatus(msg.Payload)
+		if err != nil {
+			return fmt.Errorf("invalid status data: %v", err)
+		}
+
+		log.Printf("Received status from %s: height=%d", peer.ID, status.Height)
+
+		// If peer has higher blocks, request them
+		ourHeight := bc.GetLatestBlock().Header.Height
+		if status.Height > ourHeight {
+			requestBlocks(node, peer.ID, ourHeight+1, status.Height)
+		}
+
+		return nil
+	}
+}
+
+// Broadcast functions
+
+// BroadcastBlock sends a block to all peers
+func BroadcastBlock(node *Node, block *blockchain.Block) error {
+	data, err := serializeBlock(block)
+	if err != nil {
+		return err
+	}
+
+	node.Broadcast(BlockMsg, data)
+	return nil
+}
+
+// BroadcastTransaction sends a transaction to all peers
+func BroadcastTransaction(node *Node, tx *xtx.Transaction) error {
+	data, err := serializeTransaction(tx)
+	if err != nil {
+		return err
+	}
+
+	node.Broadcast(TransactionMsg, data)
+	return nil
+}
+
+// BroadcastStatus sends our current status to all peers
+func BroadcastStatus(node *Node, bc *blockchain.Blockchain) error {
+	latestBlock := bc.GetLatestBlock()
+
+	status := Status{
+		Height:  latestBlock.Header.Height,
+		Hash:    latestBlock.Header.Hash(),
+		Version: 1,
+	}
+
+	data, err := serializeStatus(&status)
+	if err != nil {
+		return err
+	}
+
+	node.Broadcast(StatusMsg, data)
+	return nil
+}
+
+// Helper functions for requesting blocks
+func requestBlocks(node *Node, peerID string, startHeight, endHeight uint64) error {
+	request := BlockRequest{
+		StartHeight: startHeight,
+		EndHeight:   endHeight,
+	}
+
+	data, err := serializeBlockRequest(&request)
+	if err != nil {
+		return err
+	}
+
+	return node.SendTo(peerID, RequestBlockMsg, data)
+}
+
+// Data structures for messages
+
+// Status represents a node's blockchain status
+type Status struct {
+	Height  uint64
+	Hash    string
+	Version uint32
+}
+
+// BlockRequest represents a request for blocks
+type BlockRequest struct {
+	StartHeight uint64
+	EndHeight   uint64
+}
+
+// Serialization helpers
+
+func serializeBlock(block *blockchain.Block) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(block); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func deserializeBlock(data []byte) (*blockchain.Block, error) {
+	var block blockchain.Block
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&block)
+	if err != nil {
+		return nil, err
+	}
+	return &block, nil
+}
+
+func serializeTransaction(tx *xtx.Transaction) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(tx); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func deserializeTransaction(data []byte) (*xtx.Transaction, error) {
+	var tx xtx.Transaction
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&tx)
+	if err != nil {
+		return nil, err
+	}
+	return &tx, nil
+}
+
+func serializeStatus(status *Status) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(status); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func deserializeStatus(data []byte) (*Status, error) {
+	var status Status
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&status)
+	if err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+func serializeBlockRequest(req *BlockRequest) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(req); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func deserializeBlockRequest(data []byte) (*BlockRequest, error) {
+	var req BlockRequest
+	buf := bytes.NewReader(data)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&req)
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
 }

@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	defer bc.lock.Unlock()
 
 	if err := bc.ValidateBlock(block); err != nil {
+		log.Print("Invalid Block")
 		return err
 	}
 
@@ -72,6 +74,7 @@ func (bc *Blockchain) GetBlockByHeight(height uint64) (*Block, error) {
 
 func (bc *Blockchain) ValidateBlock(block *Block) error {
 	if err := bc.ValidateBlockHeader(&block.Header); err != nil {
+		log.Printf("Invlaid Block header")
 		return err
 	}
 
@@ -93,6 +96,7 @@ func (bc *Blockchain) ValidateBlock(block *Block) error {
 		}
 
 		if err := bc.ValidateTransaction(&tx); err != nil {
+			log.Printf("Invalid Tx")
 			return err
 		}
 	}
@@ -124,6 +128,7 @@ func (bc *Blockchain) ValidateTransaction(tx *xtx.Transaction) error {
 	if tx.Type != xtx.RewardTx {
 		valid, err := tx.Verify()
 		if err != nil {
+			log.Printf("Failed Verufy")
 			return err
 		}
 		if !valid {
@@ -158,31 +163,48 @@ func NewState() *State {
 	}
 }
 
-// ApplyTransaction applies a transaction to the state
+// ApplyTransaction applies a transaction to the state with proper validation
 func (s *State) ApplyTransactions(tx *xtx.Transaction) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if s.nonces[tx.From] >= tx.Nonce {
-		return errors.New("invalid nonce")
+	// For non-reward transactions, validate nonce and balance
+	if tx.Type != xtx.RewardTx {
+		currentNonce := s.nonces[tx.From]
+		if currentNonce >= tx.Nonce {
+			return errors.New("invalid nonce")
+		}
+
+		// Check if sender has enough balance
+		if s.accounts[tx.From] < tx.Value+tx.Fee {
+			return errors.New("insufficient balance")
+		}
 	}
 
 	// For transfer transactions
 	if tx.Type == xtx.TransferTx {
-		// Check if sender has enough balance
-		if s.accounts[tx.From] < tx.Value+tx.Fee {
-			return errors.New("insufficient balance")
-		} // Update Balances
+		log.Printf("Transfer Transaction")
 		s.accounts[tx.From] -= (tx.Value + tx.Fee)
 		s.accounts[tx.To] += tx.Value
-	}
-
-	// For data transactions
-	if tx.Type == xtx.DataTx && len(tx.Data) > 0 {
+	} else if tx.Type == xtx.RewardTx {
+		log.Printf("Reward Transaction")
+		// For reward transactions
+		s.accounts[tx.To] += tx.Value
+	} else if tx.Type == xtx.DataTx && len(tx.Data) > 0 {
+		// For data transactions
 		dataKey := tx.From + "-" + tx.TxID
 		s.data[dataKey] = tx.Data
+		// Deduct fee
+		if tx.From != "" {
+			s.accounts[tx.From] -= tx.Fee
+		}
 	}
-	s.nonces[tx.From] = tx.Nonce
+
+	// Update nonce if it's not a reward transaction
+	if tx.Type != xtx.RewardTx {
+		s.nonces[tx.From] = tx.Nonce
+	}
+
 	return nil
 }
 

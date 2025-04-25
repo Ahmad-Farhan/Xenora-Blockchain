@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"math"
 	"math/big"
 	"time"
 	"xenora/blockchain"
@@ -82,12 +81,11 @@ func (sc *SimpleConsensus) findProof(block *blockchain.Block) error {
 	var hash [32]byte
 	nonce := uint64(0)
 
-	maxNonce := uint64(math.MaxUint64)
-
+	maxNonce := uint64(1000000)
 	for nonce < maxNonce {
 		block.Header.Nonce = nonce
 		// Get block header as bytes and compute hash
-		headerBytes := []byte(block.Header.Hash())
+		headerBytes, _ := block.Header.Serialize()
 		hash = sha256.Sum256(headerBytes)
 		hashInt.SetBytes(hash[:])
 
@@ -108,7 +106,10 @@ func (sc *SimpleConsensus) ValidateBlock(block *blockchain.Block) error {
 	var hashInt big.Int
 
 	// Get block header as bytes (excluding nonce)
-	headerBytes := []byte(block.Header.Hash())
+	headerBytes, err := block.Header.Serialize()
+	if err != nil {
+		return err
+	}
 	hash := sha256.Sum256(headerBytes)
 	hashInt.SetBytes(hash[:])
 	if hashInt.Cmp(target) >= 0 {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"xenora/core"
+	"xenora/merkle"
 	"xenora/xtx"
 )
 
@@ -76,7 +76,7 @@ func (bc *Blockchain) ValidateBlock(block *Block) error {
 		return err
 	}
 
-	merkleTree := core.NewMerkleTree(block.Transactions)
+	merkleTree := merkle.NewMerkleTree(block.Transactions)
 	calculatedRoot := merkleTree.GetRootHash()
 	if calculatedRoot != block.Header.MerkleRoot {
 		return errors.New("invalid merkle root")

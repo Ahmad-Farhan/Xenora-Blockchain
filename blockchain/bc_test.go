@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"xenora/core"
 	"xenora/crypto"
+	"xenora/merkle"
 	"xenora/xtx"
 )
 
@@ -45,7 +45,7 @@ func TestAddBlockWithRewardTx(t *testing.T) {
 		Signature:    []byte{},
 	}
 
-	merkleTree := core.NewMerkleTree(newBlock.Transactions)
+	merkleTree := merkle.NewMerkleTree(newBlock.Transactions)
 	newBlock.Header.MerkleRoot = merkleTree.GetRootHash()
 	err := bc.AddBlock(newBlock)
 	log.Printf("Balance before minied %d", bc.state.GetBalance("miner"))
@@ -91,7 +91,7 @@ func TestAddBlockWithTransferTx(t *testing.T) {
 		Transactions: []xtx.Transaction{*tx},
 		Signature:    []byte{},
 	}
-	mt := core.NewMerkleTree(newBlock.Transactions)
+	mt := merkle.NewMerkleTree(newBlock.Transactions)
 	newBlock.Header.MerkleRoot = mt.GetRootHash()
 	if err := bc.AddBlock(newBlock); err != nil {
 		t.Fatalf("AddBlock failed: %v", err)
@@ -203,7 +203,7 @@ func TestAddBlockDuplicateTransactions(t *testing.T) {
 		Transactions: []xtx.Transaction{*tx, *tx},
 		Signature:    []byte{},
 	}
-	merkleTree := core.NewMerkleTree(newBlock.Transactions)
+	merkleTree := merkle.NewMerkleTree(newBlock.Transactions)
 	newBlock.Header.MerkleRoot = merkleTree.GetRootHash()
 	err := bc.AddBlock(newBlock)
 	if err == nil {
@@ -233,7 +233,7 @@ func TestAddBlockInvalidTransaction(t *testing.T) {
 		Transactions: []xtx.Transaction{*tx},
 		Signature:    []byte{},
 	}
-	merkleTree := core.NewMerkleTree(newBlock.Transactions)
+	merkleTree := merkle.NewMerkleTree(newBlock.Transactions)
 	newBlock.Header.MerkleRoot = merkleTree.GetRootHash()
 	err := bc.AddBlock(newBlock)
 	if err == nil {

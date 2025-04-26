@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"xenora/blockchain"
-	"xenora/core"
+	"xenora/merkle"
 	"xenora/xtx"
 )
 
@@ -23,11 +23,11 @@ type EnhancedConsensus struct {
 	difficulty         uint32
 	validators         []string
 	validatorThreshold int
-	nodeScores         map[string]float64 // Reputation scores for nodes
+	nodeScores         map[string]float64
 	scoreLock          sync.RWMutex
-	voteCache          map[string][]string // blockHash -> list of validators who voted
+	voteCache          map[string][]string
 	voteLock           sync.RWMutex
-	validatorWeights   map[string]int // validator -> weight
+	validatorWeights   map[string]int
 	targetBits         uint32
 	ProposerSelector   func(height uint64) string // For Testing only
 }
@@ -39,16 +39,13 @@ func NewEnhancedConsensus(bc *blockchain.Blockchain, difficulty uint32, validato
 		validatorThreshold = 1
 	}
 
-	// Initialize validators with equal weights to start
 	validatorWeights := make(map[string]int)
 	for _, v := range validators {
-		validatorWeights[v] = 100 // Start with base weight of 100
+		validatorWeights[v] = 100
 	}
-
-	// Initial node scores (reputation system)
 	nodeScores := make(map[string]float64)
 	for _, validator := range validators {
-		nodeScores[validator] = 100.0 // Start with a perfect score
+		nodeScores[validator] = 100.0
 	}
 
 	return &EnhancedConsensus{
@@ -70,10 +67,7 @@ func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx
 		return nil, errors.New("blockchain not initialized")
 	}
 
-	// Get pending transactions from pool
 	pendingTxs := txPool.GetPending()
-
-	// Create block header
 	header := blockchain.BlockHeader{
 		Version:      1,
 		Height:       latestBlock.Header.Height + 1,
@@ -81,26 +75,20 @@ func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx
 		Timestamp:    time.Now(),
 		Difficulty:   ec.difficulty,
 		ProposerID:   proposerAddress,
-		ShardID:      0, // Single shard for now
+		ShardID:      0,
 	}
 
-	// Add coinbase transaction to beginning
 	pendingTxs = prepend(pendingTxs, coinbaseTx)
-
-	// Create merkle root
 	merkleRoot, err := ec.computeMerkleRoot(pendingTxs)
 	if err != nil {
 		return nil, err
 	}
 	header.MerkleRoot = merkleRoot
 
-	// Convert transactions to the required format
 	txs := make([]xtx.Transaction, len(pendingTxs))
 	for i, tx := range pendingTxs {
 		txs[i] = *tx
 	}
-
-	// Create new block
 	block := &blockchain.Block{
 		Header:       header,
 		Transactions: txs,
@@ -122,7 +110,7 @@ func (ec *EnhancedConsensus) computeMerkleRoot(txs []*xtx.Transaction) (string, 
 	for i, tx := range txs {
 		derefTxs[i] = *tx
 	}
-	merkleTree := core.NewMerkleTree(derefTxs)
+	merkleTree := merkle.NewMerkleTree(derefTxs)
 	return merkleTree.GetRootHash(), nil
 }
 

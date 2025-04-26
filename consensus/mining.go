@@ -176,15 +176,21 @@ func (m *EnhancedMiner) shouldMineNextBlock() (bool, time.Duration) {
 		return true, 0
 	}
 	// Not selected: retry after interval
-	return false, time.Second * 5
+	return false, m.calculateWaitTime()
 }
 
-// calculateWaitTime returns how long to pause before retrying
 func (m *EnhancedMiner) calculateWaitTime() time.Duration {
-	base := time.Second * 5
-	backoff := time.Duration(m.failedAttempts) * time.Second
-	if backoff > base {
-		backoff = base
+	baseTime := time.Second * 5
+	repute := m.consensus.GetNodeReputation(m.minerAddr)
+	reputationFactor := 1.0
+	if m.isValidator { // Higher rep → lower wait
+		reputationFactor = 1.0 - (repute / 200.0)
 	}
-	return base + backoff
+
+	backoff := time.Duration(m.failedAttempts) * time.Second
+	if backoff > baseTime {
+		backoff = baseTime
+	}
+	adjusted := time.Duration(float64(baseTime+backoff) * reputationFactor)
+	return adjusted
 }

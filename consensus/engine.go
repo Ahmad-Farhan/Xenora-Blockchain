@@ -33,7 +33,8 @@ type EnhancedConsensus struct {
 }
 
 // NewEnhancedConsensus creates a new consensus engine with reputation tracking
-func NewEnhancedConsensus(bc *blockchain.Blockchain, difficulty uint32, validators []string) *EnhancedConsensus {
+func NewEnhancedConsensus(bc *blockchain.Blockchain, difficulty uint32,
+	validators []string) *EnhancedConsensus {
 	validatorThreshold := len(validators)/2 + 1
 	if validatorThreshold < 1 {
 		validatorThreshold = 1
@@ -61,12 +62,14 @@ func NewEnhancedConsensus(bc *blockchain.Blockchain, difficulty uint32, validato
 }
 
 // CreateBlock creates a new block with enhanced consensus data
-func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx.Transaction, txPool *xtx.TransactionPool) (*blockchain.Block, error) {
+func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx.Transaction,
+	txPool *xtx.TransactionPool) (*blockchain.Block, error) {
 	latestBlock := ec.blockchain.GetLatestBlock()
 	if latestBlock == nil {
 		return nil, errors.New("blockchain not initialized")
 	}
 
+	forestRoot := ec.blockchain.GetMerkleForestHash()
 	pendingTxs := txPool.GetPending()
 	header := blockchain.BlockHeader{
 		Version:      1,
@@ -76,6 +79,7 @@ func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx
 		Difficulty:   ec.difficulty,
 		ProposerID:   proposerAddress,
 		ShardID:      0,
+		ForestRoot:   forestRoot,
 	}
 
 	pendingTxs = prepend(pendingTxs, coinbaseTx)
@@ -96,11 +100,9 @@ func (ec *EnhancedConsensus) CreateBlock(proposerAddress string, coinbaseTx *xtx
 
 	// Find proof for the block
 	isValidator := ec.isValidator(proposerAddress)
-	err = ec.findEnhancedProof(block, proposerAddress, isValidator)
-	if err != nil {
+	if err = ec.findEnhancedProof(block, proposerAddress, isValidator); err != nil {
 		return nil, err
 	}
-
 	return block, nil
 }
 

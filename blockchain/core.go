@@ -10,6 +10,8 @@ import (
 	"xenora/xtx"
 )
 
+const InitialShards = 2
+
 // Blockchain represents the core blockchain structure
 type Blockchain struct {
 	blocks      []*Block
@@ -17,18 +19,20 @@ type Blockchain struct {
 	lock        sync.RWMutex
 	state       *State
 	txPool      *xtx.TransactionPool
+	forest      *merkle.MerkleForest
 }
 
 // NewBlockchain creates a new blockchain with a genesis block
 func NewBlockchain() *Blockchain {
 	genesis := GenesisBlock()
 	initialState := NewState()
-
+	merklForest := merkle.NewMerkleForest(InitialShards)
 	blockchain := &Blockchain{
 		blocks:      []*Block{genesis},
 		latestBlock: genesis,
 		state:       initialState,
 		txPool:      xtx.NewTransactionPool(),
+		forest:      merklForest,
 	}
 	return blockchain
 }
@@ -48,6 +52,7 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	// Update state with transactions in the block
 	for _, tx := range block.Transactions {
 		bc.state.ApplyTransactions(&tx)
+		bc.forest.AddTransaction(tx)
 		bc.txPool.Remove(tx.TxID)
 	}
 	return nil
@@ -58,6 +63,10 @@ func (bc *Blockchain) GetLatestBlock() *Block {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
 	return bc.latestBlock
+}
+
+func (bc *Blockchain) GetMerkleForestHash() string {
+	return bc.forest.GetForestHash()
 }
 
 // GetBlockByHeight returns a block at the specified height
@@ -130,13 +139,15 @@ func (bc *Blockchain) ValidateTransaction(tx *xtx.Transaction) error {
 		if !valid {
 			return errors.New("invalid transaction signature")
 		}
-		senderBalance := bc.state.GetBalance(tx.From)
-		if senderBalance < tx.Value+tx.Fee {
-			return errors.New("insufficient balance")
-		}
-		expectedNonce := bc.state.GetNonce(tx.From) + 1
-		if tx.Nonce != expectedNonce {
-			return errors.New("invalid nonce")
+		if tx.Type != xtx.CrossShardTx || tx.ExtraFields == nil || tx.ExtraFields["atomicID"] == nil {
+			senderBalance := bc.state.GetBalance(tx.From)
+			if senderBalance < tx.Value+tx.Fee {
+				return errors.New("insufficient balance")
+			}
+			expectedNonce := bc.state.GetNonce(tx.From) + 1
+			if tx.Nonce != expectedNonce {
+				return errors.New("invalid nonce")
+			}
 		}
 	}
 	return nil

@@ -31,6 +31,7 @@ type BlockHeader struct {
 	ShardID       uint32    `json:"shardID"`       // ID of the shard this block belongs to (for future sharding)
 	ProposerID    string    `json:"proposerID"`    // ID of the node that proposed this block
 	ConsensusData []byte    `json:"consensusData"` // Additional data required by consensus algorithm
+	ForestRoot    string    `json: "forestRoot`
 }
 
 const nullhash = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros

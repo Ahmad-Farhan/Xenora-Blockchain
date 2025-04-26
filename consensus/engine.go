@@ -29,6 +29,7 @@ type EnhancedConsensus struct {
 	voteLock           sync.RWMutex
 	validatorWeights   map[string]int // validator -> weight
 	targetBits         uint32
+	ProposerSelector   func(height uint64) string // For Testing only
 }
 
 // NewEnhancedConsensus creates a new consensus engine with reputation tracking
@@ -339,12 +340,14 @@ func (ec *EnhancedConsensus) validateFullBlock(block *blockchain.Block) error {
 	hashInt.SetBytes(hash[:])
 
 	if hashInt.Cmp(target) >= 0 {
+		return errors.New("invalid proof of work")
+
 		// If it fails the strict test, we can apply some leniency for testing
-		lenientTarget := big.NewInt(0).Mul(target, big.NewInt(10))
-		if hashInt.Cmp(lenientTarget) >= 0 {
-			return errors.New("invalid proof of work")
-		}
-		log.Printf("Warning: Block %d is using lenient PoW validation", block.Header.Height)
+		// lenientTarget := big.NewInt(0).Mul(target, big.NewInt(10))
+		// if hashInt.Cmp(lenientTarget) >= 0 {
+		// 	return errors.New("invalid proof of work")
+		// }
+		// log.Printf("Warning: Block %d is using lenient PoW validation", block.Header.Height)
 	}
 	ec.updateReputationScore(block.Header.ProposerID, 0.5)
 
@@ -499,7 +502,6 @@ func (ec *EnhancedConsensus) IsBlockConfirmed(blockHash string) bool {
 		}
 		weightedVotes += weight
 	}
-
 	totalWeight := 0
 	for _, validator := range ec.validators {
 		weight := ec.validatorWeights[validator]
@@ -510,7 +512,7 @@ func (ec *EnhancedConsensus) IsBlockConfirmed(blockHash string) bool {
 	}
 
 	// Need more than 2/3 of weighted votes
-	return weightedVotes*3 > totalWeight*2
+	return weightedVotes*3 >= totalWeight*2
 }
 
 // GetBlockValidators returns the list of validators who confirmed a block
@@ -570,6 +572,9 @@ func (ec *EnhancedConsensus) RewardNode(address string, amount float64) {
 
 // SelectBlockProposer uses weighted random selection based on reputation
 func (ec *EnhancedConsensus) SelectBlockProposer(blockHeight uint64) string {
+	if ec.ProposerSelector != nil {
+		return ec.ProposerSelector(blockHeight)
+	}
 	// Use VRF-like mechanism to pick a proposer
 	seed := time.Now().UnixNano() + int64(blockHeight)
 	r := rand.New(rand.NewSource(seed))

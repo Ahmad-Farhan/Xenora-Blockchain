@@ -26,18 +26,18 @@ const (
 
 // Transaction represents a transaction in the Xenora blockchain
 type Transaction struct {
-	TxID        string                 `json:"txID"`        // Transaction ID (hash)
-	Type        TransactionType        `json:"type"`        // Type of transaction
-	From        string                 `json:"from"`        // Sender address
-	To          string                 `json:"to"`          // Recipient address
-	Value       uint64                 `json:"value"`       // Amount to transfer
-	Data        []byte                 `json:"data"`        // Additional data/payload
-	Timestamp   time.Time              `json:"timestamp"`   // Transaction creation time
-	Nonce       uint64                 `json:"nonce"`       // Sender's account nonce (for replay protection)
-	Fee         uint64                 `json:"fee"`         // Transaction fee
-	Signature   []byte                 `json:"signature"`   // Digital signature
-	ShardID     uint32                 `json:"shardID"`     // Destination shard ID (for cross-shard)
-	ExtraFields map[string]interface{} `json:"extraFields"` // Extensible fields for future use
+	TxID        string          `json:"txID"`        // Transaction ID (hash)
+	Type        TransactionType `json:"type"`        // Type of transaction
+	From        string          `json:"from"`        // Sender address
+	To          string          `json:"to"`          // Recipient address
+	Value       uint64          `json:"value"`       // Amount to transfer
+	Data        []byte          `json:"data"`        // Additional data/payload
+	Timestamp   time.Time       `json:"timestamp"`   // Transaction creation time
+	Nonce       uint64          `json:"nonce"`       // Sender's account nonce (for replay protection)
+	Fee         uint64          `json:"fee"`         // Transaction fee
+	Signature   []byte          `json:"signature"`   // Digital signature
+	ShardID     uint32          `json:"shardID"`     // Destination shard ID (for cross-shard)
+	ExtraFields map[string]any  `json:"extraFields"` // Extensible fields for future use
 }
 
 const nullhash = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros

@@ -63,9 +63,11 @@ func (css *CrossShardSynchronizer) ProcessCrossShardTransaction(ctx *CrossShardT
 	for _, targetShard := range ctx.TargetShards {
 		coordTx := *ctx.MainTx
 		coordTx.ShardID = targetShard
+		if coordTx.ExtraFields == nil {
+			coordTx.ExtraFields = make(map[string]any)
+		}
 		coordTx.ExtraFields["atomicID"] = ctx.AtomicID
 		coordTx.ExtraFields["sourceShardID"] = ctx.SourceShard
-
 		css.forest.AddTransaction(coordTx)
 	}
 
@@ -76,11 +78,10 @@ func (css *CrossShardSynchronizer) ProcessCrossShardTransaction(ctx *CrossShardT
 // VerifyCrossShardTransaction verifies a cross-shard transaction across all involved shards
 func (css *CrossShardSynchronizer) VerifyCrossShardTransaction(atomicID string) (bool, error) {
 	transactionMap := make(map[uint32][]*xtx.Transaction)
-
 	// Search for the transaction across all shards
 	for shardID, tree := range css.forest.Trees {
 		for _, tx := range tree.leaves {
-			if atomicID, ok := tx.ExtraFields["atomicID"]; ok && atomicID == atomicID {
+			if txAtomicID, ok := tx.ExtraFields["atomicID"]; ok && txAtomicID == atomicID {
 				if _, exists := transactionMap[shardID]; !exists {
 					transactionMap[shardID] = make([]*xtx.Transaction, 0)
 				}
@@ -96,7 +97,7 @@ func (css *CrossShardSynchronizer) VerifyCrossShardTransaction(atomicID string) 
 	var sourceShardFound bool
 	for _, txs := range transactionMap {
 		for _, tx := range txs {
-			if _, ok := tx.ExtraFields["sourceShardID"]; !ok {
+			if _, ok := tx.ExtraFields["sourceShardID"]; ok {
 				sourceShardFound = true
 				break
 			}

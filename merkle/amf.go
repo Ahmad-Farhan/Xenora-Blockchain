@@ -31,7 +31,11 @@ type MerkleForest struct {
 	bloomFilters   map[uint32]*BloomFilter
 }
 
-const nullhash = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros
+const (
+	nullhash    = "0000000000000000000000000000000000000000000000000000000000000000" // 64 zeros
+	shardThresh = 50
+	maxShards   = 16
+)
 
 // NewMerkleForest creates a new Merkle Forest with initial sharding configuration
 func NewMerkleForest(initialShardCount uint32) *MerkleForest {
@@ -43,8 +47,8 @@ func NewMerkleForest(initialShardCount uint32) *MerkleForest {
 		Trees:          make(map[uint32]*MerkleTree),
 		ShardInfo:      make(map[uint32]*ShardInfo),
 		TotalShards:    initialShardCount,
-		MaxShardsLimit: 16,
-		ShardThreshold: 1000,
+		MaxShardsLimit: maxShards,
+		ShardThreshold: shardThresh,
 		bloomFilters:   make(map[uint32]*BloomFilter),
 	}
 

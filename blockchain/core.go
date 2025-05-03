@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"xenora/merkle"
+	"xenora/state"
 	"xenora/xtx"
 )
 
@@ -17,7 +18,7 @@ type Blockchain struct {
 	blocks      []*Block
 	latestBlock *Block
 	lock        sync.RWMutex
-	state       *State
+	state       *state.EnhancedState
 	txPool      *xtx.TransactionPool
 	forest      *merkle.MerkleForest
 }
@@ -25,14 +26,15 @@ type Blockchain struct {
 // NewBlockchain creates a new blockchain with a genesis block
 func NewBlockchain() *Blockchain {
 	genesis := GenesisBlock()
-	initialState := NewState()
-	merklForest := merkle.NewMerkleForest(InitialShards)
+	initialState := state.NewEnhancedState()
+	merkleForest := merkle.NewMerkleForest(InitialShards)
+	genesis.Header.StateRoot = initialState.GetStateRootString()
 	blockchain := &Blockchain{
 		blocks:      []*Block{genesis},
 		latestBlock: genesis,
 		state:       initialState,
 		txPool:      xtx.NewTransactionPool(),
-		forest:      merklForest,
+		forest:      merkleForest,
 	}
 	return blockchain
 }
@@ -51,10 +53,19 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 
 	// Update state with transactions in the block
 	for _, tx := range block.Transactions {
-		bc.state.ApplyTransactions(&tx)
+		bc.state.ApplyTransaction(&tx)
 		bc.forest.AddTransaction(tx)
 		bc.txPool.Remove(tx.TxID)
 	}
+	// Update state root if using EnhancedState
+	if enhancedState := bc.state; enhancedState != nil {
+		block.Header.StateRoot = enhancedState.GetStateRootString()
+		if block.Header.Height%state.SnapshotInterval == 0 {
+			enhancedState.CreateSnapshot(block.Header.Height)
+		}
+		enhancedState.PruneState(block.Header.Height)
+	}
+
 	return nil
 }
 
@@ -123,6 +134,13 @@ func (bc *Blockchain) ValidateBlockHeader(header *BlockHeader) error {
 	if header.Timestamp.Before(bc.latestBlock.Header.Timestamp) {
 		return errors.New("block timestamp before previous block")
 	}
+	// Validate state root if available
+	if enhancedState := bc.state; header.Height > 0 {
+		expectedStateRoot := enhancedState.GetStateRootString()
+		if header.StateRoot != "" && header.StateRoot != expectedStateRoot {
+			return errors.New("invalid state root")
+		}
+	}
 	return nil
 }
 
@@ -153,6 +171,37 @@ func (bc *Blockchain) ValidateTransaction(tx *xtx.Transaction) error {
 	return nil
 }
 
+func (bc *Blockchain) Close() error {
+	if enhancedState := bc.state; enhancedState != nil {
+		return enhancedState.Close()
+	}
+	return nil
+}
+
+func (bc *Blockchain) GetStateProof(key string) ([]byte, error) {
+	bc.lock.RLock()
+	defer bc.lock.RUnlock()
+
+	enhancedState := bc.state
+	if enhancedState != nil {
+		return nil, errors.New("enhanced state not available")
+	}
+
+	return enhancedState.GenerateStateProof(key)
+}
+
+func (bc *Blockchain) VerifyStateProof(proofData []byte) (bool, error) {
+	bc.lock.RLock()
+	defer bc.lock.RUnlock()
+
+	enhancedState := bc.state
+	if enhancedState != nil {
+		return false, errors.New("enhanced state not available")
+	}
+
+	return enhancedState.VerifyStateProof(proofData)
+}
+
 // State represents the current state of accounts and data
 type State struct {
 	accounts map[string]uint64 // address -> balance
@@ -171,7 +220,7 @@ func NewState() *State {
 }
 
 // ApplyTransaction applies a transaction to the state with proper validation
-func (s *State) ApplyTransactions(tx *xtx.Transaction) error {
+func (s *State) ApplyTransaction(tx *xtx.Transaction) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 

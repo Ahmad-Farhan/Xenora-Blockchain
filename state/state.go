@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"sync"
 	"time"
@@ -18,99 +19,99 @@ import (
 const (
 	stateDBPath      = "./data/state"
 	archiveDBPath    = "./data/archive"
-	SnapshotInterval = 1000 // Take a snapshot every 1000 blocks
+	SnapshotInterval = 100 // Take a snapshot every 1000 blocks
 )
 
 // EnhancedState extends the existing State with compression and archival capabilities
 type EnhancedState struct {
-	accounts   map[string]uint64 // address -> balance
-	data       map[string][]byte // key -> value store for data
-	nonces     map[string]uint64 // address -> nonce
-	stateRoot  []byte            // Merkle root of the entire state
-	archive    *StateArchive     // Archive for state persistence
-	merkleTree *StateMerkleTree  // Merkle tree for state verification
-	prune      *StatePruner      // Pruner for state management
-	lock       sync.RWMutex
+	accounts    map[string]uint64 // address -> balance
+	data        map[string][]byte // key -> value store for data
+	nonces      map[string]uint64 // address -> nonce
+	stateRoot   []byte            // Merkle root of the entire state
+	archive     *StateArchive     // Archive for state persistence
+	merkleTree  *StateMerkleTree  // Merkle tree for state verification
+	prune       *StatePruner      // Pruner for state management
+	accumulator *CryptoAccumulator
+	zkSystem    *ZKProofSystem
+	lock        sync.RWMutex
 }
 
 type BaseState struct {
-	Accounts  map[string]uint64
-	Data      map[string][]byte
-	Nonces    map[string]uint64
-	StateRoot []byte
-	Timestamp time.Time
+	Accounts   map[string]uint64
+	Data       map[string][]byte
+	Nonces     map[string]uint64
+	StateRoot  []byte
+	AccumValue *big.Int
+	Timestamp  time.Time
 }
 
 // StateArchive handles persistence and retrieval of state data
 type StateArchive struct {
-	db        *leveldb.DB
+	stateDB   *leveldb.DB
 	archiveDB *leveldb.DB
 }
 
 // StatePruner handles state pruning operations
 type StatePruner struct {
-	state          *EnhancedState
-	snapshotHeight uint64
-	snapshots      map[uint64][]byte // height -> stateRoot
+	state     *EnhancedState
+	ssHeight  uint64
+	snapshots map[uint64][]byte // height -> stateRoot
 }
 
 // NewEnhancedState creates a new EnhancedState
 func NewEnhancedState() *EnhancedState {
 	archive, err := newStateArchive()
 	if err != nil {
-		panic(fmt.Sprintf("Failed to initialize state archive: %v", err))
+		panic(fmt.Sprintf("Archive init failed: %v", err))
 	}
 
-	state := &EnhancedState{
-		accounts:   make(map[string]uint64),
-		data:       make(map[string][]byte),
-		nonces:     make(map[string]uint64),
-		archive:    archive,
-		merkleTree: newStateMerkleTree(),
+	s := &EnhancedState{
+		accounts:    make(map[string]uint64),
+		data:        make(map[string][]byte),
+		nonces:      make(map[string]uint64),
+		archive:     archive,
+		merkleTree:  newStateMerkleTree(),
+		accumulator: newCryptoAccumulator(),
+		zkSystem:    newZKProofSystem(),
 	}
 
-	state.prune = newStatePruner(state)
+	s.prune = newStatePruner(s)
 
-	// Try to load the latest state from the archive
-	err = state.LoadLatestState()
-	if err != nil {
-		fmt.Printf("Starting with fresh state: %v\n", err)
+	if err := s.LoadLatestState(); err != nil {
+		fmt.Printf("Fresh state: %v\n", err)
 	}
 
-	return state
+	return s
 }
 
 // GetBalance returns the balance for an address
 func (s *EnhancedState) GetBalance(address string) uint64 {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	balance, exists := s.accounts[address]
-	if !exists {
-		return 0
+	if balance, exists := s.accounts[address]; exists {
+		return balance
 	}
-	return balance
+	return 0
 }
 
 // GetNonce returns the nonce for an address
 func (s *EnhancedState) GetNonce(address string) uint64 {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	nonce, exists := s.nonces[address]
-	if !exists {
-		return 0
+	if nonce, exists := s.nonces[address]; exists {
+		return nonce
 	}
-	return nonce
+	return 0
 }
 
 // GetData retrieves stored data by key
 func (s *EnhancedState) GetData(key string) []byte {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	data, exists := s.data[key]
-	if !exists {
-		return nil
+	if data, exists := s.data[key]; exists {
+		return data
 	}
-	return data
+	return nil
 }
 
 // GetStateRootString returns the current state root as a hex string
@@ -123,9 +124,8 @@ func (s *EnhancedState) GetStateRoot() []byte {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	if s.merkleTree.modified {
+	if len(s.stateRoot) == 0 {
 		s.computeStateRoot()
-		s.merkleTree.modified = false
 	}
 
 	return s.stateRoot
@@ -158,6 +158,7 @@ func (s *EnhancedState) computeStateRoot() {
 
 	// Compute the root hash
 	s.stateRoot = s.merkleTree.computeRoot()
+	s.updateAccumulator()
 }
 
 // ApplyTransaction applies a transaction to the state
@@ -166,8 +167,7 @@ func (s *EnhancedState) ApplyTransaction(tx *xtx.Transaction) error {
 	defer s.lock.Unlock()
 
 	if tx.Type != xtx.RewardTx {
-		currentNonce := s.nonces[tx.From]
-		if currentNonce >= tx.Nonce {
+		if s.nonces[tx.From] >= tx.Nonce {
 			return errors.New("invalid nonce")
 		}
 		if s.accounts[tx.From] < tx.Value+tx.Fee {
@@ -201,7 +201,7 @@ func (s *EnhancedState) ApplyTransaction(tx *xtx.Transaction) error {
 		s.nonces[tx.From] = tx.Nonce
 	}
 
-	s.merkleTree.modified = true
+	s.stateRoot = nil
 	return nil
 }
 
@@ -253,19 +253,19 @@ func newStateArchive() (*StateArchive, error) {
 		CompactionTableSize: 2 * 1024 * 1024,
 		WriteBuffer:         16 * 1024 * 1024,
 	}
-	db, err := leveldb.OpenFile(stateDBPath, opts)
+	stateDB, err := leveldb.OpenFile(stateDBPath, opts)
 	if err != nil {
 		return nil, err
 	}
 
 	archiveDB, err := leveldb.OpenFile(archiveDBPath, opts)
 	if err != nil {
-		db.Close()
+		stateDB.Close()
 		return nil, err
 	}
 
 	return &StateArchive{
-		db:        db,
+		stateDB:   stateDB,
 		archiveDB: archiveDB,
 	}, nil
 }
@@ -275,7 +275,7 @@ func (s *EnhancedState) LoadLatestState() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	heightBytes, err := s.archive.db.Get([]byte("latest_snapshot"), nil)
+	heightBytes, err := s.archive.stateDB.Get([]byte("latest_snapshot"), nil)
 	if err != nil {
 		return err
 	}
@@ -284,17 +284,22 @@ func (s *EnhancedState) LoadLatestState() error {
 	fmt.Sscanf(string(heightBytes), "%d", &height)
 
 	key := fmt.Sprintf("snapshot:%d", height)
-	data, err := s.archive.db.Get([]byte(key), nil)
+	compressedData, err := s.archive.stateDB.Get([]byte(key), nil)
 	if err != nil {
 		return err
 	}
 
-	err = s.deserialize(data)
+	data, err := decompress(compressedData)
 	if err != nil {
 		return err
 	}
 
-	s.prune.snapshotHeight = height
+	if err = s.deserialize(data); err != nil {
+		return err
+	}
+
+	s.prune.ssHeight = height
+	s.stateRoot = nil
 	return nil
 }
 
@@ -302,13 +307,17 @@ func (s *EnhancedState) LoadLatestState() error {
 func (s *EnhancedState) serialize() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
+	if len(s.stateRoot) == 0 {
+		s.computeStateRoot()
+	}
 
 	state := BaseState{
-		Accounts:  s.accounts,
-		Data:      s.data,
-		Nonces:    s.nonces,
-		StateRoot: s.stateRoot,
-		Timestamp: time.Now(),
+		Accounts:   s.accounts,
+		Data:       s.data,
+		Nonces:     s.nonces,
+		StateRoot:  s.stateRoot,
+		AccumValue: s.accumulator.value,
+		Timestamp:  time.Now(),
 	}
 
 	if err := enc.Encode(state); err != nil {
@@ -323,8 +332,8 @@ func (s *EnhancedState) deserialize(data []byte) error {
 	var state BaseState
 	buf := bytes.NewReader(data)
 	dec := gob.NewDecoder(buf)
-	err := dec.Decode(&state)
-	if err != nil {
+
+	if err := dec.Decode(&state); err != nil {
 		return err
 	}
 
@@ -332,7 +341,10 @@ func (s *EnhancedState) deserialize(data []byte) error {
 	s.data = state.Data
 	s.nonces = state.Nonces
 	s.stateRoot = state.StateRoot
-	s.merkleTree.modified = true
+
+	if state.AccumValue != nil {
+		s.accumulator.value = state.AccumValue
+	}
 
 	return nil
 }
@@ -340,8 +352,7 @@ func (s *EnhancedState) deserialize(data []byte) error {
 // PruneState prunes the state based on the specified strategy
 func (s *EnhancedState) PruneState(currentHeight uint64) error {
 	if currentHeight%SnapshotInterval == 0 {
-		err := s.CreateSnapshot(currentHeight)
-		if err != nil {
+		if err := s.CreateSnapshot(currentHeight); err != nil {
 			return err
 		}
 	}
@@ -350,7 +361,7 @@ func (s *EnhancedState) PruneState(currentHeight uint64) error {
 
 // Archive moves older state snapshots to archival storage
 func (s *EnhancedState) Archive(height uint64) error {
-	if height > s.prune.snapshotHeight-2*SnapshotInterval {
+	if height > s.prune.ssHeight-2*SnapshotInterval {
 		return nil
 	}
 
@@ -358,7 +369,7 @@ func (s *EnhancedState) Archive(height uint64) error {
 	defer s.lock.Unlock()
 
 	key := fmt.Sprintf("snapshot:%d", height)
-	data, err := s.archive.db.Get([]byte(key), nil)
+	data, err := s.archive.stateDB.Get([]byte(key), nil)
 	if err != nil {
 		return err
 	}
@@ -368,7 +379,7 @@ func (s *EnhancedState) Archive(height uint64) error {
 		return err
 	}
 
-	return s.archive.db.Delete([]byte(key), nil)
+	return s.archive.stateDB.Delete([]byte(key), nil)
 }
 
 // CreateSnapshot creates a snapshot of the current state at a specific height
@@ -376,9 +387,8 @@ func (s *EnhancedState) CreateSnapshot(height uint64) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if s.merkleTree.modified {
+	if len(s.stateRoot) == 0 {
 		s.computeStateRoot()
-		s.merkleTree.modified = false
 	}
 
 	stateData, err := s.serialize()
@@ -386,17 +396,23 @@ func (s *EnhancedState) CreateSnapshot(height uint64) error {
 		return err
 	}
 
+	compressedData, err := compress(stateData)
+	if err != nil {
+		return err
+	}
+
 	key := fmt.Sprintf("snapshot:%d", height)
-	err = s.archive.db.Put([]byte(key), stateData, nil)
+	err = s.archive.stateDB.Put([]byte(key), compressedData, nil)
 	if err != nil {
 		return err
 	}
 
 	// Store the state root in the pruner
 	s.prune.snapshots[height] = s.stateRoot
-	s.prune.snapshotHeight = height
+	s.prune.ssHeight = height
 
-	err = s.archive.db.Put([]byte("latest_snapshot"), []byte(fmt.Sprintf("%d", height)), nil)
+	value := []byte(fmt.Sprintf("%d", height))
+	err = s.archive.stateDB.Put([]byte("latest_snapshot"), value, nil)
 	if err != nil {
 		return err
 	}
@@ -414,9 +430,8 @@ func (s *EnhancedState) VerifyStateProof(proofData []byte) (bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	if s.merkleTree.modified {
+	if len(s.stateRoot) == 0 {
 		s.computeStateRoot()
-		s.merkleTree.modified = false
 	}
 
 	currentHash := proof.Hash
@@ -429,7 +444,13 @@ func (s *EnhancedState) VerifyStateProof(proofData []byte) (bool, error) {
 		}
 		currentHash = hashData(combined)
 	}
-	return bytes.Equal(currentHash, s.stateRoot), nil
+
+	merkleValid := bytes.Equal(currentHash, s.stateRoot)
+	zkValid := true
+	if proof.ZKProof != nil {
+		zkValid = s.zkSystem.verifyProof(proof.ZKProof)
+	}
+	return merkleValid && zkValid, nil
 }
 
 // GenerateStateProof generates a proof for a specific key in the state
@@ -437,9 +458,8 @@ func (s *EnhancedState) GenerateStateProof(key string) ([]byte, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	if s.merkleTree.modified {
+	if len(s.stateRoot) == 0 {
 		s.computeStateRoot()
-		s.merkleTree.modified = false
 	}
 
 	node, exists := s.merkleTree.nodes[key]
@@ -469,7 +489,11 @@ func (s *EnhancedState) GenerateStateProof(key string) ([]byte, error) {
 		current = parent
 		parent = s.findParent(current)
 	}
-
+	zkProof, err := s.zkSystem.generateProof(key, node.Value, s.stateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ZK proof: %v", err)
+	}
+	proof.ZKProof = zkProof
 	return serializeProof(proof)
 }
 
@@ -489,8 +513,8 @@ func (s *EnhancedState) Close() error {
 	defer s.lock.Unlock()
 
 	if s.archive != nil {
-		if s.archive.db != nil {
-			if err := s.archive.db.Close(); err != nil {
+		if s.archive.stateDB != nil {
+			if err := s.archive.stateDB.Close(); err != nil {
 				return err
 			}
 		}

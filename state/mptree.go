@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/gob"
+	"math/big"
 	"sort"
 )
 
@@ -18,16 +19,14 @@ type StateNode struct {
 
 // StateMerkleTree provides cryptographic state representation
 type StateMerkleTree struct {
-	root     *StateNode
-	nodes    map[string]*StateNode
-	modified bool
+	root  *StateNode
+	nodes map[string]*StateNode
 }
 
 // newStateMerkleTree creates a new Merkle tree for state management
 func newStateMerkleTree() *StateMerkleTree {
 	return &StateMerkleTree{
-		nodes:    make(map[string]*StateNode),
-		modified: true,
+		nodes: make(map[string]*StateNode),
 	}
 }
 
@@ -39,7 +38,6 @@ func (smt *StateMerkleTree) addNode(key string, value []byte) {
 		Value: value,
 		Hash:  hash,
 	}
-	smt.modified = true
 }
 
 // computeRoot computes the root hash of the Merkle tree
@@ -91,6 +89,7 @@ type StateProof struct {
 	StateRoot []byte
 	Path      [][]byte
 	Positions []bool
+	ZKProof   *ZKStateProof
 }
 
 // serializeProof serializes a state proof
@@ -128,4 +127,18 @@ func uint64ToBytes(val uint64) []byte {
 		buf[i] = byte(val >> (8 * i))
 	}
 	return buf
+}
+
+func hashToPrime(data string) *big.Int {
+	hash := sha256.Sum256([]byte(data))
+	num := new(big.Int).SetBytes(hash[:])
+
+	// Find next prime using Miller-Rabin test
+	if num.Bit(0) == 0 {
+		num.Add(num, big.NewInt(1))
+	}
+	for !num.ProbablyPrime(20) {
+		num.Add(num, big.NewInt(2))
+	}
+	return num
 }

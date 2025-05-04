@@ -56,14 +56,15 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 		bc.forest.AddTransaction(tx)
 		bc.txPool.Remove(tx.TxID)
 	}
-	// Update state root if using EnhancedState
-	if enhancedState := bc.state; enhancedState != nil {
-		block.Header.StateRoot = enhancedState.GetStateRootString()
-		if block.Header.Height%state.SnapshotInterval == 0 {
-			enhancedState.CreateSnapshot(block.Header.Height)
-		}
-		enhancedState.PruneState(block.Header.Height)
+	computedStateRoot := bc.state.GetStateRootString()
+	if block.Header.StateRoot != computedStateRoot {
+		return errors.New("invalid state root")
 	}
+	block.Header.StateRoot = computedStateRoot
+	if block.Header.Height%state.SnapshotInterval == 0 {
+		bc.state.CreateSnapshot(block.Header.Height)
+	}
+	bc.state.PruneState(block.Header.Height)
 
 	return nil
 }

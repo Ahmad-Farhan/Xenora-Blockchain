@@ -89,7 +89,7 @@ type StateProof struct {
 	StateRoot []byte
 	Path      [][]byte
 	Positions []bool
-	ZKProof   *ZKStateProof
+	// ZKProof   *ZKStateProof
 }
 
 // serializeProof serializes a state proof

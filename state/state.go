@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"sync"
@@ -32,8 +33,8 @@ type EnhancedState struct {
 	merkleTree  *StateMerkleTree  // Merkle tree for state verification
 	prune       *StatePruner      // Pruner for state management
 	accumulator *CryptoAccumulator
-	zkSystem    *ZKProofSystem
 	lock        sync.RWMutex
+	// zkSystem    *ZKProofSystem
 }
 
 type BaseState struct {
@@ -72,7 +73,7 @@ func NewEnhancedState() *EnhancedState {
 		archive:     archive,
 		merkleTree:  newStateMerkleTree(),
 		accumulator: newCryptoAccumulator(),
-		zkSystem:    newZKProofSystem(),
+		// zkSystem:    newZKProofSystem(),
 	}
 
 	s.prune = newStatePruner(s)
@@ -255,11 +256,13 @@ func newStateArchive() (*StateArchive, error) {
 	}
 	stateDB, err := leveldb.OpenFile(stateDBPath, opts)
 	if err != nil {
+		log.Print("File open state failed")
 		return nil, err
 	}
 
 	archiveDB, err := leveldb.OpenFile(archiveDBPath, opts)
 	if err != nil {
+		log.Print("File open archive failed")
 		stateDB.Close()
 		return nil, err
 	}
@@ -268,39 +271,6 @@ func newStateArchive() (*StateArchive, error) {
 		stateDB:   stateDB,
 		archiveDB: archiveDB,
 	}, nil
-}
-
-// LoadLatestState loads the most recent state snapshot
-func (s *EnhancedState) LoadLatestState() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	heightBytes, err := s.archive.stateDB.Get([]byte("latest_snapshot"), nil)
-	if err != nil {
-		return err
-	}
-
-	var height uint64
-	fmt.Sscanf(string(heightBytes), "%d", &height)
-
-	key := fmt.Sprintf("snapshot:%d", height)
-	compressedData, err := s.archive.stateDB.Get([]byte(key), nil)
-	if err != nil {
-		return err
-	}
-
-	data, err := decompress(compressedData)
-	if err != nil {
-		return err
-	}
-
-	if err = s.deserialize(data); err != nil {
-		return err
-	}
-
-	s.prune.ssHeight = height
-	s.stateRoot = nil
-	return nil
 }
 
 // serialize serializes the entire state
@@ -420,6 +390,39 @@ func (s *EnhancedState) CreateSnapshot(height uint64) error {
 	return nil
 }
 
+// LoadLatestState loads the most recent state snapshot
+func (s *EnhancedState) LoadLatestState() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	heightBytes, err := s.archive.stateDB.Get([]byte("latest_snapshot"), nil)
+	if err != nil {
+		return err
+	}
+
+	var height uint64
+	fmt.Sscanf(string(heightBytes), "%d", &height)
+
+	key := fmt.Sprintf("snapshot:%d", height)
+	compressedData, err := s.archive.stateDB.Get([]byte(key), nil)
+	if err != nil {
+		return err
+	}
+
+	data, err := decompress(compressedData)
+	if err != nil {
+		return err
+	}
+
+	if err = s.deserialize(data); err != nil {
+		return err
+	}
+
+	s.prune.ssHeight = height
+	s.stateRoot = nil
+	return nil
+}
+
 // VerifyStateProof verifies a proof against the current state root
 func (s *EnhancedState) VerifyStateProof(proofData []byte) (bool, error) {
 	proof, err := deserializeProof(proofData)
@@ -447,9 +450,9 @@ func (s *EnhancedState) VerifyStateProof(proofData []byte) (bool, error) {
 
 	merkleValid := bytes.Equal(currentHash, s.stateRoot)
 	zkValid := true
-	if proof.ZKProof != nil {
-		zkValid = s.zkSystem.verifyProof(proof.ZKProof)
-	}
+	// if proof.ZKProof != nil {
+	// 	zkValid = s.zkSystem.verifyProof(proof.ZKProof)
+	// }
 	return merkleValid && zkValid, nil
 }
 
@@ -489,11 +492,11 @@ func (s *EnhancedState) GenerateStateProof(key string) ([]byte, error) {
 		current = parent
 		parent = s.findParent(current)
 	}
-	zkProof, err := s.zkSystem.generateProof(key, node.Value, s.stateRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate ZK proof: %v", err)
-	}
-	proof.ZKProof = zkProof
+	// zkProof, err := s.zkSystem.generateProof(key, node.Value, s.stateRoot)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to generate ZK proof: %v", err)
+	// }
+	// proof.ZKProof = zkProof
 	return serializeProof(proof)
 }
 
@@ -513,17 +516,17 @@ func (s *EnhancedState) Close() error {
 	defer s.lock.Unlock()
 
 	if s.archive != nil {
-		if s.archive.stateDB != nil {
-			if err := s.archive.stateDB.Close(); err != nil {
-				return err
-			}
-		}
-		if s.archive.archiveDB != nil {
-			if err := s.archive.archiveDB.Close(); err != nil {
-				return err
-			}
-		}
+		s.archive.Close()
 	}
 
 	return nil
+}
+
+func (sa *StateArchive) Close() {
+	if sa.stateDB != nil {
+		sa.stateDB.Close()
+	}
+	if sa.archiveDB != nil {
+		sa.archiveDB.Close()
+	}
 }

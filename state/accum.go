@@ -3,11 +3,8 @@ package state
 import (
 	"bytes"
 	"compress/zlib"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"io"
 	"math/big"
 	"sync"
@@ -22,55 +19,55 @@ type CryptoAccumulator struct {
 	lock       sync.RWMutex
 }
 
-// ZKProofSystem handles zero-knowledge proofs for state
-type ZKProofSystem struct {
-	curve      elliptic.Curve    // Elliptic curve for commitments
-	g          *ecdsa.PublicKey  // Generator point
-	h          *ecdsa.PublicKey  // Blinding factor generator
-	privateKey *ecdsa.PrivateKey // System private key
-}
+// // ZKProofSystem handles zero-knowledge proofs for state
+// type ZKProofSystem struct {
+// 	curve      elliptic.Curve    // Elliptic curve for commitments
+// 	g          *ecdsa.PublicKey  // Generator point
+// 	h          *ecdsa.PublicKey  // Blinding factor generator
+// 	privateKey *ecdsa.PrivateKey // System private key
+// }
 
-// PedersenCommitment represents a commitment in the form g^v * h^r
-type PedersenCommitment struct {
-	C []byte   // Commitment value (point on curve)
-	V []byte   // Value being committed to
-	R *big.Int // Random blinding factor
-}
+// // PedersenCommitment represents a commitment in the form g^v * h^r
+// type PedersenCommitment struct {
+// 	C []byte   // Commitment value (point on curve)
+// 	V []byte   // Value being committed to
+// 	R *big.Int // Random blinding factor
+// }
 
-// ZKStateProof contains zero-knowledge proof elements
-type ZKStateProof struct {
-	Commitment []byte
-	Challenge  []byte
-	Response   *big.Int
-	Key        string
-	StateRoot  []byte
-}
+// // ZKStateProof contains zero-knowledge proof elements
+// type ZKStateProof struct {
+// 	Commitment []byte
+// 	Challenge  []byte
+// 	Response   *big.Int
+// 	Key        string
+// 	StateRoot  []byte
+// }
 
-func newZKProofSystem() *ZKProofSystem {
-	curve := elliptic.P256()
-	privateKey, _ := ecdsa.GenerateKey(curve, rand.Reader)
-	g := &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).Set(privateKey.PublicKey.X),
-		Y:     new(big.Int).Set(privateKey.PublicKey.Y),
-	}
+// func newZKProofSystem() *ZKProofSystem {
+// 	curve := elliptic.P256()
+// 	privateKey, _ := ecdsa.GenerateKey(curve, rand.Reader)
+// 	g := &ecdsa.PublicKey{
+// 		Curve: curve,
+// 		X:     new(big.Int).Set(privateKey.PublicKey.X),
+// 		Y:     new(big.Int).Set(privateKey.PublicKey.Y),
+// 	}
 
-	// Create h as a different point
-	k, _ := rand.Int(rand.Reader, curve.Params().N)
-	hX, hY := curve.ScalarBaseMult(k.Bytes())
-	h := &ecdsa.PublicKey{
-		Curve: curve,
-		X:     hX,
-		Y:     hY,
-	}
+// 	// Create h as a different point
+// 	k, _ := rand.Int(rand.Reader, curve.Params().N)
+// 	hX, hY := curve.ScalarBaseMult(k.Bytes())
+// 	h := &ecdsa.PublicKey{
+// 		Curve: curve,
+// 		X:     hX,
+// 		Y:     hY,
+// 	}
 
-	return &ZKProofSystem{
-		curve:      curve,
-		g:          g,
-		h:          h,
-		privateKey: privateKey,
-	}
-}
+// 	return &ZKProofSystem{
+// 		curve:      curve,
+// 		g:          g,
+// 		h:          h,
+// 		privateKey: privateKey,
+// 	}
+// }
 
 // updateAccumulator updates the cryptographic accumulator
 func (s *EnhancedState) updateAccumulator() {
@@ -166,72 +163,72 @@ func decompress(data []byte) ([]byte, error) {
 	return io.ReadAll(r)
 }
 
-func (zk *ZKProofSystem) generateProof(key string, value []byte, stateRoot []byte) (*ZKStateProof, error) {
-	// Create a Pedersen commitment to the value
-	valueInt := new(big.Int).SetBytes(value)
-	r, err := rand.Int(rand.Reader, zk.curve.Params().N)
-	if err != nil {
-		return nil, err
-	}
+// func (zk *ZKProofSystem) generateProof(key string, value []byte, stateRoot []byte) (*ZKStateProof, error) {
+// 	// Create a Pedersen commitment to the value
+// 	valueInt := new(big.Int).SetBytes(value)
+// 	r, err := rand.Int(rand.Reader, zk.curve.Params().N)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// Compute commitment C = g^value * h^r
-	vX, vY := zk.curve.ScalarMult(zk.g.X, zk.g.Y, valueInt.Bytes())
-	rX, rY := zk.curve.ScalarMult(zk.h.X, zk.h.Y, r.Bytes())
-	cX, cY := zk.curve.Add(vX, vY, rX, rY)
+// 	// Compute commitment C = g^value * h^r
+// 	vX, vY := zk.curve.ScalarMult(zk.g.X, zk.g.Y, valueInt.Bytes())
+// 	rX, rY := zk.curve.ScalarMult(zk.h.X, zk.h.Y, r.Bytes())
+// 	cX, cY := zk.curve.Add(vX, vY, rX, rY)
 
-	commitment := elliptic.Marshal(zk.curve, cX, cY)
-	w, _ := rand.Int(rand.Reader, zk.curve.Params().N)
+// 	commitment := elliptic.Marshal(zk.curve, cX, cY)
+// 	w, _ := rand.Int(rand.Reader, zk.curve.Params().N)
 
-	// Compute witness commitment A = g^w * h^0
-	aX, aY := zk.curve.ScalarMult(zk.g.X, zk.g.Y, w.Bytes())
-	witnessCommitment := elliptic.Marshal(zk.curve, aX, aY)
+// 	// Compute witness commitment A = g^w * h^0
+// 	aX, aY := zk.curve.ScalarMult(zk.g.X, zk.g.Y, w.Bytes())
+// 	witnessCommitment := elliptic.Marshal(zk.curve, aX, aY)
 
-	// Create challenge e = H(commitment || witnessCommitment || key || stateRoot)
-	challengeInput := append(commitment, witnessCommitment...)
-	challengeInput = append(challengeInput, []byte(key)...)
-	challengeInput = append(challengeInput, stateRoot...)
-	challengeHash := sha256.Sum256(challengeInput)
-	e := new(big.Int).SetBytes(challengeHash[:])
-	e.Mod(e, zk.curve.Params().N)
+// 	// Create challenge e = H(commitment || witnessCommitment || key || stateRoot)
+// 	challengeInput := append(commitment, witnessCommitment...)
+// 	challengeInput = append(challengeInput, []byte(key)...)
+// 	challengeInput = append(challengeInput, stateRoot...)
+// 	challengeHash := sha256.Sum256(challengeInput)
+// 	e := new(big.Int).SetBytes(challengeHash[:])
+// 	e.Mod(e, zk.curve.Params().N)
 
-	// Compute response z = w + e * value (in Z_q)
-	valueTimesE := new(big.Int).Mul(valueInt, e)
-	z := new(big.Int).Add(w, valueTimesE)
-	z.Mod(z, zk.curve.Params().N)
+// 	// Compute response z = w + e * value (in Z_q)
+// 	valueTimesE := new(big.Int).Mul(valueInt, e)
+// 	z := new(big.Int).Add(w, valueTimesE)
+// 	z.Mod(z, zk.curve.Params().N)
 
-	return &ZKStateProof{
-		Commitment: commitment,
-		Challenge:  challengeHash[:],
-		Response:   z,
-		Key:        key,
-		StateRoot:  stateRoot,
-	}, nil
-}
+// 	return &ZKStateProof{
+// 		Commitment: commitment,
+// 		Challenge:  challengeHash[:],
+// 		Response:   z,
+// 		Key:        key,
+// 		StateRoot:  stateRoot,
+// 	}, nil
+// }
 
-func (zk *ZKProofSystem) verifyProof(proof *ZKStateProof) bool {
-	e := new(big.Int).SetBytes(proof.Challenge)
-	cX, cY := elliptic.Unmarshal(zk.curve, proof.Commitment)
-	if cX == nil {
-		return false
-	}
+// func (zk *ZKProofSystem) verifyProof(proof *ZKStateProof) bool {
+// 	e := new(big.Int).SetBytes(proof.Challenge)
+// 	cX, cY := elliptic.Unmarshal(zk.curve, proof.Commitment)
+// 	if cX == nil {
+// 		return false
+// 	}
 
-	// Compute g^z and C^e
-	zX, zY := zk.curve.ScalarBaseMult(proof.Response.Bytes())
-	eX, eY := zk.curve.ScalarMult(cX, cY, e.Bytes())
+// 	// Compute g^z and C^e
+// 	zX, zY := zk.curve.ScalarBaseMult(proof.Response.Bytes())
+// 	eX, eY := zk.curve.ScalarMult(cX, cY, e.Bytes())
 
-	// For verification, we need to compute A = g^z * (C^e)^-1
-	negEY := new(big.Int).Sub(zk.curve.Params().P, eY)
+// 	// For verification, we need to compute A = g^z * (C^e)^-1
+// 	negEY := new(big.Int).Sub(zk.curve.Params().P, eY)
 
-	// Compute A = g^z - C^e
-	aX, aY := zk.curve.Add(zX, zY, eX, negEY)
+// 	// Compute A = g^z - C^e
+// 	aX, aY := zk.curve.Add(zX, zY, eX, negEY)
 
-	// Reconstruct challenge
-	witnessCommitment := elliptic.Marshal(zk.curve, aX, aY)
-	challengeInput := append(proof.Commitment, witnessCommitment...)
-	challengeInput = append(challengeInput, []byte(proof.Key)...)
-	challengeInput = append(challengeInput, proof.StateRoot...)
-	challengeHash := sha256.Sum256(challengeInput)
+// 	// Reconstruct challenge
+// 	witnessCommitment := elliptic.Marshal(zk.curve, aX, aY)
+// 	challengeInput := append(proof.Commitment, witnessCommitment...)
+// 	challengeInput = append(challengeInput, []byte(proof.Key)...)
+// 	challengeInput = append(challengeInput, proof.StateRoot...)
+// 	challengeHash := sha256.Sum256(challengeInput)
 
-	// Verify challenge matches
-	return bytes.Equal(challengeHash[:], proof.Challenge)
-}
+// 	// Verify challenge matches
+// 	return bytes.Equal(challengeHash[:], proof.Challenge)
+// }

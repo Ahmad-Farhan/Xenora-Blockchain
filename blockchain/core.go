@@ -2,7 +2,6 @@ package blockchain
 
 import (
 	"errors"
-	"log"
 	"sync"
 	"time"
 
@@ -181,107 +180,11 @@ func (bc *Blockchain) Close() error {
 func (bc *Blockchain) GetStateProof(key string) ([]byte, error) {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
-
-	enhancedState := bc.state
-	if enhancedState != nil {
-		return nil, errors.New("enhanced state not available")
-	}
-
-	return enhancedState.GenerateStateProof(key)
+	return bc.state.GenerateStateProof(key)
 }
 
 func (bc *Blockchain) VerifyStateProof(proofData []byte) (bool, error) {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
-
-	enhancedState := bc.state
-	if enhancedState != nil {
-		return false, errors.New("enhanced state not available")
-	}
-
-	return enhancedState.VerifyStateProof(proofData)
-}
-
-// State represents the current state of accounts and data
-type State struct {
-	accounts map[string]uint64 // address -> balance
-	data     map[string][]byte // key -> value store for data
-	nonces   map[string]uint64 // address -> nonce
-	lock     sync.RWMutex
-}
-
-// NewState creates a new state
-func NewState() *State {
-	return &State{
-		accounts: make(map[string]uint64),
-		data:     make(map[string][]byte),
-		nonces:   make(map[string]uint64),
-	}
-}
-
-// ApplyTransaction applies a transaction to the state with proper validation
-func (s *State) ApplyTransaction(tx *xtx.Transaction) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	// For non-reward transactions, validate nonce and balance
-	if tx.Type != xtx.RewardTx {
-		currentNonce := s.nonces[tx.From]
-		if currentNonce >= tx.Nonce {
-			return errors.New("invalid nonce")
-		}
-
-		// Check if sender has enough balance
-		if s.accounts[tx.From] < tx.Value+tx.Fee {
-			return errors.New("insufficient balance")
-		}
-	}
-
-	// For transfer transactions
-	if tx.Type == xtx.TransferTx {
-		log.Printf("Transfer Transaction")
-		s.accounts[tx.From] -= (tx.Value + tx.Fee)
-		s.accounts[tx.To] += tx.Value
-	} else if tx.Type == xtx.RewardTx {
-		log.Printf("Reward Transaction")
-		// For reward transactions
-		s.accounts[tx.To] += tx.Value
-	} else if tx.Type == xtx.DataTx && len(tx.Data) > 0 {
-		// For data transactions
-		dataKey := tx.From + "-" + tx.TxID
-		s.data[dataKey] = tx.Data
-		// Deduct fee
-		if tx.From != "" {
-			s.accounts[tx.From] -= tx.Fee
-		}
-	}
-
-	// Update nonce if it's not a reward transaction
-	if tx.Type != xtx.RewardTx {
-		s.nonces[tx.From] = tx.Nonce
-	}
-
-	return nil
-}
-
-func (s *State) GetBalance(address string) uint64 {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	balance, exists := s.accounts[address]
-	if !exists {
-		return 0
-	}
-	return balance
-}
-
-func (s *State) GetNonce(address string) uint64 {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	nonce, exists := s.nonces[address]
-	if !exists {
-		return 0
-	}
-	return nonce
+	return bc.state.VerifyStateProof(proofData)
 }

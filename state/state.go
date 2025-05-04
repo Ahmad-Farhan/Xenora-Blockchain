@@ -21,13 +21,6 @@ const (
 	SnapshotInterval = 1000 // Take a snapshot every 1000 blocks
 )
 
-// StateNode represents a node in the state merkle tree
-type StateNode struct {
-	Key   string
-	Value []byte
-	Hash  []byte
-}
-
 // EnhancedState extends the existing State with compression and archival capabilities
 type EnhancedState struct {
 	accounts   map[string]uint64 // address -> balance
@@ -81,7 +74,6 @@ func NewEnhancedState() *EnhancedState {
 	// Try to load the latest state from the archive
 	err = state.LoadLatestState()
 	if err != nil {
-		// If we can't load a state, we're starting fresh
 		fmt.Printf("Starting with fresh state: %v\n", err)
 	}
 
@@ -142,7 +134,7 @@ func (s *EnhancedState) GetStateRoot() []byte {
 // computeStateRoot calculates the Merkle root of the current state
 func (s *EnhancedState) computeStateRoot() {
 	// Clear the existing tree
-	s.merkleTree.nodeMap = make(map[string]*StateNode)
+	s.merkleTree.nodes = make(map[string]*StateNode)
 
 	// Add all accounts to the tree
 	for addr, balance := range s.accounts {
@@ -202,18 +194,14 @@ func (s *EnhancedState) ApplyTransaction(tx *xtx.Transaction) error {
 		}
 
 	case xtx.CrossShardTx:
-		// Handle cross-shard transaction logic
 		s.accounts[tx.From] -= (tx.Value + tx.Fee)
-		// The receiving account will be updated when the transaction is finalized
 	}
 
 	if tx.Type != xtx.RewardTx {
 		s.nonces[tx.From] = tx.Nonce
 	}
 
-	// Mark the Merkle tree as modified
 	s.merkleTree.modified = true
-
 	return nil
 }
 
@@ -254,7 +242,6 @@ func (sp *StatePruner) pruneOldSnapshots(currentHeight uint64) error {
 
 // newStateArchive creates a new state archive
 func newStateArchive() (*StateArchive, error) {
-	// Ensure directories exist
 	if err := os.MkdirAll(stateDBPath, 0755); err != nil {
 		return nil, err
 	}
@@ -262,7 +249,6 @@ func newStateArchive() (*StateArchive, error) {
 		return nil, err
 	}
 
-	// Open the main state database
 	opts := &opt.Options{
 		CompactionTableSize: 2 * 1024 * 1024,
 		WriteBuffer:         16 * 1024 * 1024,
@@ -272,7 +258,6 @@ func newStateArchive() (*StateArchive, error) {
 		return nil, err
 	}
 
-	// Open the archive database
 	archiveDB, err := leveldb.OpenFile(archiveDBPath, opts)
 	if err != nil {
 		db.Close()
@@ -290,7 +275,6 @@ func (s *EnhancedState) LoadLatestState() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Get the latest snapshot height
 	heightBytes, err := s.archive.db.Get([]byte("latest_snapshot"), nil)
 	if err != nil {
 		return err
@@ -299,7 +283,6 @@ func (s *EnhancedState) LoadLatestState() error {
 	var height uint64
 	fmt.Sscanf(string(heightBytes), "%d", &height)
 
-	// Load the snapshot
 	key := fmt.Sprintf("snapshot:%d", height)
 	data, err := s.archive.db.Get([]byte(key), nil)
 	if err != nil {
@@ -338,7 +321,6 @@ func (s *EnhancedState) serialize() ([]byte, error) {
 // deserialize deserializes the state from bytes
 func (s *EnhancedState) deserialize(data []byte) error {
 	var state BaseState
-
 	buf := bytes.NewReader(data)
 	dec := gob.NewDecoder(buf)
 	err := dec.Decode(&state)
@@ -357,21 +339,17 @@ func (s *EnhancedState) deserialize(data []byte) error {
 
 // PruneState prunes the state based on the specified strategy
 func (s *EnhancedState) PruneState(currentHeight uint64) error {
-	// If we've passed the snapshot interval, create a new snapshot
 	if currentHeight%SnapshotInterval == 0 {
 		err := s.CreateSnapshot(currentHeight)
 		if err != nil {
 			return err
 		}
 	}
-
-	// Let the pruner decide what to prune
 	return s.prune.pruneOldSnapshots(currentHeight)
 }
 
 // Archive moves older state snapshots to archival storage
 func (s *EnhancedState) Archive(height uint64) error {
-	// Only archive if it's far enough in the past
 	if height > s.prune.snapshotHeight-2*SnapshotInterval {
 		return nil
 	}
@@ -385,13 +363,11 @@ func (s *EnhancedState) Archive(height uint64) error {
 		return err
 	}
 
-	// Store in archive DB
 	err = s.archive.archiveDB.Put([]byte(key), data, nil)
 	if err != nil {
 		return err
 	}
 
-	// Delete from main DB
 	return s.archive.db.Delete([]byte(key), nil)
 }
 
@@ -400,19 +376,16 @@ func (s *EnhancedState) CreateSnapshot(height uint64) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Compute state root if needed
 	if s.merkleTree.modified {
 		s.computeStateRoot()
 		s.merkleTree.modified = false
 	}
 
-	// Serialize the state
 	stateData, err := s.serialize()
 	if err != nil {
 		return err
 	}
 
-	// Store the snapshot in the archive
 	key := fmt.Sprintf("snapshot:%d", height)
 	err = s.archive.db.Put([]byte(key), stateData, nil)
 	if err != nil {
@@ -423,7 +396,6 @@ func (s *EnhancedState) CreateSnapshot(height uint64) error {
 	s.prune.snapshots[height] = s.stateRoot
 	s.prune.snapshotHeight = height
 
-	// Store a reference to this snapshot as latest
 	err = s.archive.db.Put([]byte("latest_snapshot"), []byte(fmt.Sprintf("%d", height)), nil)
 	if err != nil {
 		return err
@@ -442,21 +414,22 @@ func (s *EnhancedState) VerifyStateProof(proofData []byte) (bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	// Ensure we have the latest state root
 	if s.merkleTree.modified {
 		s.computeStateRoot()
 		s.merkleTree.modified = false
 	}
 
-	// In a real implementation, this would verify the Merkle path
-	// For our prototype, we'll verify the key exists in our current state
-	valueHash := hashData(proof.Value)
-	if !bytes.Equal(valueHash, proof.Hash) {
-		return false, errors.New("hash mismatch")
+	currentHash := proof.Hash
+	for i, sibling := range proof.Path {
+		var combined []byte
+		if proof.Positions[i] {
+			combined = append(currentHash, sibling...)
+		} else {
+			combined = append(sibling, currentHash...)
+		}
+		currentHash = hashData(combined)
 	}
-
-	// Simple verification - check if the state root matches our current state
-	return bytes.Equal(s.stateRoot, proof.StateRoot), nil
+	return bytes.Equal(currentHash, s.stateRoot), nil
 }
 
 // GenerateStateProof generates a proof for a specific key in the state
@@ -469,45 +442,45 @@ func (s *EnhancedState) GenerateStateProof(key string) ([]byte, error) {
 		s.merkleTree.modified = false
 	}
 
-	// Generate a simple inclusion proof
-	// In a production system, this would be more sophisticated
+	node, exists := s.merkleTree.nodes[key]
+	if !exists {
+		return nil, errors.New("key not found")
+	}
+
 	proof := &StateProof{
 		Key:       key,
+		Value:     node.Value,
+		Hash:      node.Hash,
 		StateRoot: s.stateRoot,
+		Path:      [][]byte{},
+		Positions: []bool{},
 	}
 
-	// Figure out what type of key this is and get the value
-	var value []byte
-	if len(key) >= 5 && key[:5] == "acct:" {
-		addr := key[5:]
-		balance, exists := s.accounts[addr]
-		if !exists {
-			return nil, errors.New("account not found")
+	current := node
+	parent := s.findParent(current)
+	for parent != nil {
+		if parent.Left == current {
+			proof.Path = append(proof.Path, parent.Right.Hash)
+			proof.Positions = append(proof.Positions, true)
+		} else {
+			proof.Path = append(proof.Path, parent.Left.Hash)
+			proof.Positions = append(proof.Positions, false)
 		}
-		value = uint64ToBytes(balance)
-	} else if len(key) >= 6 && key[:6] == "nonce:" {
-		addr := key[6:]
-		nonce, exists := s.nonces[addr]
-		if !exists {
-			return nil, errors.New("nonce not found")
-		}
-		value = uint64ToBytes(nonce)
-	} else if len(key) >= 5 && key[:5] == "data:" {
-		dataKey := key[5:]
-		var exists bool
-		value, exists = s.data[dataKey]
-		if !exists {
-			return nil, errors.New("data not found")
-		}
-	} else {
-		return nil, errors.New("invalid key format")
+		current = parent
+		parent = s.findParent(current)
 	}
 
-	proof.Value = value
-	proof.Hash = hashData(value)
-
-	// Serialize the proof
 	return serializeProof(proof)
+}
+
+// findParent finds the parent of a node in the Merkle tree
+func (s *EnhancedState) findParent(node *StateNode) *StateNode {
+	for _, n := range s.merkleTree.nodes {
+		if n.Left == node || n.Right == node {
+			return n
+		}
+	}
+	return nil
 }
 
 // Close closes the state databases

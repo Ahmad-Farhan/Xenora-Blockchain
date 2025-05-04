@@ -4,19 +4,29 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/gob"
+	"sort"
 )
+
+// StateNode represents a node in the state merkle tree
+type StateNode struct {
+	Key   string
+	Value []byte
+	Hash  []byte
+	Left  *StateNode
+	Right *StateNode
+}
 
 // StateMerkleTree provides cryptographic state representation
 type StateMerkleTree struct {
-	root     []byte
-	nodeMap  map[string]*StateNode
+	root     *StateNode
+	nodes    map[string]*StateNode
 	modified bool
 }
 
 // newStateMerkleTree creates a new Merkle tree for state management
 func newStateMerkleTree() *StateMerkleTree {
 	return &StateMerkleTree{
-		nodeMap:  make(map[string]*StateNode),
+		nodes:    make(map[string]*StateNode),
 		modified: true,
 	}
 }
@@ -24,35 +34,53 @@ func newStateMerkleTree() *StateMerkleTree {
 // addNode adds a node to the Merkle tree
 func (smt *StateMerkleTree) addNode(key string, value []byte) {
 	hash := hashData(value)
-	smt.nodeMap[key] = &StateNode{
+	smt.nodes[key] = &StateNode{
 		Key:   key,
 		Value: value,
 		Hash:  hash,
 	}
+	smt.modified = true
 }
 
 // computeRoot computes the root hash of the Merkle tree
 func (smt *StateMerkleTree) computeRoot() []byte {
-	if len(smt.nodeMap) == 0 {
-		// Return a special hash for empty tree
+	if len(smt.nodes) == 0 {
 		return hashData([]byte("empty_state"))
 	}
 
-	// Sort keys for deterministic root calculation
-	keys := make([]string, 0, len(smt.nodeMap))
-	for k := range smt.nodeMap {
-		keys = append(keys, k)
+	// Get all leaf nodes
+	leaves := make([]*StateNode, 0, len(smt.nodes))
+	for _, node := range smt.nodes {
+		leaves = append(leaves, node)
+	}
+	sort.Slice(leaves, func(i, j int) bool {
+		return leaves[i].Key < leaves[j].Key
+	})
+
+	// Build the tree bottom-up
+	for len(leaves) > 1 {
+		var nextLevel []*StateNode
+		for i := 0; i < len(leaves); i += 2 {
+			if i+1 < len(leaves) {
+				// Pair two nodes
+				combined := append(leaves[i].Hash, leaves[i+1].Hash...)
+				parentHash := hashData(combined)
+				parent := &StateNode{
+					Hash:  parentHash,
+					Left:  leaves[i],
+					Right: leaves[i+1],
+				}
+				nextLevel = append(nextLevel, parent)
+			} else {
+				// Odd node out, promote it
+				nextLevel = append(nextLevel, leaves[i])
+			}
+		}
+		leaves = nextLevel
 	}
 
-	// For efficiency in the prototype, just combine all hashes
-	// In a real implementation, this would build a proper Merkle tree
-	combinedHash := []byte{}
-	for _, key := range keys {
-		node := smt.nodeMap[key]
-		combinedHash = append(combinedHash, node.Hash...)
-	}
-
-	return hashData(combinedHash)
+	smt.root = leaves[0]
+	return smt.root.Hash
 }
 
 // StateProof represents a proof that a key has a specific value in the state
@@ -61,6 +89,8 @@ type StateProof struct {
 	Value     []byte
 	Hash      []byte
 	StateRoot []byte
+	Path      [][]byte
+	Positions []bool
 }
 
 // serializeProof serializes a state proof
